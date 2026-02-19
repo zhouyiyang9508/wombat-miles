@@ -3,7 +3,8 @@
 import asyncio
 import logging
 import sys
-from datetime import date, timedelta
+from collections import defaultdict
+from datetime import date, datetime, timedelta
 from typing import Annotated, Optional
 
 import typer
@@ -11,6 +12,7 @@ from rich.console import Console
 
 from . import cache
 from . import price_history
+from . import alerts as alerts_mod
 from .formatter import (
     console,
     print_calendar_view,
@@ -34,6 +36,9 @@ app.add_typer(cache_app, name="cache")
 
 history_app = typer.Typer(help="Price history commands")
 app.add_typer(history_app, name="history")
+
+alert_app = typer.Typer(help="Award-flight alert commands")
+app.add_typer(alert_app, name="alert")
 
 logging.basicConfig(
     level=logging.WARNING,
@@ -493,6 +498,298 @@ def history_clear(
             typer.confirm("Clear ALL price history?", abort=True)
         count = price_history.clear_history()
         console.print(f"[green]Cleared {count} total price history records.[/green]")
+
+
+# ---------------------------------------------------------------------------
+# alert sub-commands
+# ---------------------------------------------------------------------------
+
+@alert_app.command("add")
+def alert_add(
+    origin: Annotated[str, typer.Argument(help="Origin airport code (e.g. SFO)")],
+    destination: Annotated[str, typer.Argument(help="Destination airport code (e.g. NRT)")],
+    cabin: Annotated[Optional[str], typer.Option("--class", "-c", help="Cabin: economy, business, first")] = None,
+    program: Annotated[str, typer.Option("--program", "-p", help="Program: alaska, aeroplan, all")] = "all",
+    max_miles: Annotated[Optional[int], typer.Option("--max-miles", "-m", help="Trigger when miles ≤ this value")] = None,
+    webhook: Annotated[Optional[str], typer.Option("--webhook", "-w", help="Discord webhook URL")] = None,
+):
+    """
+    ➕ Create a new award-flight alert.
+
+    The alert fires when availability is found matching your criteria.
+    Use --max-miles to only be notified when the price is low enough.
+    Pair with `wombat-miles monitor` (run via cron) to get notifications.
+
+    Examples:
+
+      wombat-miles alert add SFO NRT --class business --max-miles 70000 --webhook https://discord.com/api/webhooks/...
+
+      wombat-miles alert add SFO YYZ --program aeroplan --max-miles 35000
+
+      wombat-miles alert add SFO NRT   # notify on any availability
+    """
+    if cabin and cabin not in ("economy", "business", "first"):
+        console.print("[red]Invalid cabin. Choose: economy, business, first[/red]")
+        raise typer.Exit(1)
+
+    alert_id = alerts_mod.add_alert(
+        origin=origin.upper(),
+        destination=destination.upper(),
+        cabin=cabin,
+        program=program,
+        max_miles=max_miles,
+        discord_webhook=webhook,
+    )
+    console.print(f"[green]✅ Alert #{alert_id} created:[/green] {origin.upper()} → {destination.upper()}", end="")
+    if cabin:
+        console.print(f" | {cabin.title()}", end="")
+    if max_miles:
+        console.print(f" | ≤ {max_miles:,} miles", end="")
+    if webhook:
+        console.print(f" | 🔔 Discord webhook set", end="")
+    console.print()
+
+
+@alert_app.command("list")
+def alert_list(
+    all_: Annotated[bool, typer.Option("--all", "-a", help="Include disabled alerts")] = False,
+):
+    """
+    📋 List configured alerts.
+
+    Example:
+
+      wombat-miles alert list
+    """
+    from rich.table import Table
+    from rich import box as rich_box
+
+    alert_list_data = alerts_mod.list_alerts(include_disabled=all_)
+    if not alert_list_data:
+        console.print("[dim]No alerts configured. Use `wombat-miles alert add` to create one.[/dim]")
+        return
+
+    table = Table(
+        title="🔔 Configured Alerts",
+        box=rich_box.ROUNDED,
+        show_header=True,
+        header_style="bold cyan",
+    )
+    table.add_column("ID", justify="right", style="dim", width=4)
+    table.add_column("Route", style="bold")
+    table.add_column("Cabin")
+    table.add_column("Program")
+    table.add_column("Max Miles", justify="right")
+    table.add_column("Webhook", style="dim")
+    table.add_column("Status")
+
+    for a in alert_list_data:
+        webhook_display = "✅ set" if a.discord_webhook else "[dim]—[/dim]"
+        status = "[green]active[/green]" if a.enabled else "[dim]disabled[/dim]"
+        table.add_row(
+            str(a.id),
+            f"{a.origin} → {a.destination}",
+            a.cabin.title() if a.cabin else "[dim]any[/dim]",
+            a.program,
+            f"{a.max_miles:,}" if a.max_miles else "[dim]any[/dim]",
+            webhook_display,
+            status,
+        )
+
+    console.print(table)
+
+
+@alert_app.command("remove")
+def alert_remove(
+    alert_id: Annotated[int, typer.Argument(help="Alert ID to remove")],
+):
+    """
+    🗑  Remove an alert by ID.
+
+    Example:
+
+      wombat-miles alert remove 3
+    """
+    if alerts_mod.remove_alert(alert_id):
+        console.print(f"[green]Alert #{alert_id} removed.[/green]")
+    else:
+        console.print(f"[red]Alert #{alert_id} not found.[/red]")
+        raise typer.Exit(1)
+
+
+@alert_app.command("history")
+def alert_history(
+    alert_id: Annotated[Optional[int], typer.Argument(help="Alert ID (optional, shows all if omitted)")] = None,
+    limit: Annotated[int, typer.Option("--limit", "-n", help="Max rows to show")] = 20,
+):
+    """
+    📜 Show recent alert fire history.
+
+    Example:
+
+      wombat-miles alert history
+      wombat-miles alert history 2 --limit 10
+    """
+    from rich.table import Table
+    from rich import box as rich_box
+
+    history = alerts_mod.get_alert_history(alert_id, limit=limit)
+    if not history:
+        console.print("[dim]No alert history yet.[/dim]")
+        return
+
+    table = Table(
+        title="📜 Alert Fire History",
+        box=rich_box.ROUNDED,
+        header_style="bold cyan",
+    )
+    table.add_column("Alert", justify="right", width=5)
+    table.add_column("Flight Date")
+    table.add_column("Flight #")
+    table.add_column("Cabin")
+    table.add_column("Program")
+    table.add_column("Miles", justify="right")
+    table.add_column("Taxes", justify="right")
+    table.add_column("New Low")
+    table.add_column("Fired At")
+
+    for row in history:
+        fired_str = (
+            datetime.fromtimestamp(row["fired_at"]).strftime("%m-%d %H:%M")
+            if row.get("fired_at")
+            else "–"
+        )
+        table.add_row(
+            str(row["alert_id"]),
+            row.get("flight_date") or "–",
+            row.get("flight_no") or "–",
+            row.get("cabin") or "–",
+            row.get("program") or "–",
+            f"{row['miles']:,}" if row.get("miles") else "–",
+            f"${row['taxes_usd']:.0f}" if row.get("taxes_usd") is not None else "–",
+            "🔥 yes" if row.get("is_new_low") else "–",
+            fired_str,
+        )
+
+    console.print(table)
+
+
+# ---------------------------------------------------------------------------
+# monitor command — run all alerts, optionally fire webhooks
+# ---------------------------------------------------------------------------
+
+@app.command()
+def monitor(
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Check alerts but don't send notifications")] = False,
+    program: Annotated[str, typer.Option("--program", "-p", help="Limit to program: alaska, aeroplan, all")] = "all",
+    days: Annotated[int, typer.Option("--days", "-d", help="Search N days ahead for each alert route")] = 7,
+    verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
+    no_cache: Annotated[bool, typer.Option("--no-cache", help="Skip cache")] = False,
+    dedup_hours: Annotated[float, typer.Option("--dedup-hours", help="Suppress re-firing within N hours")] = 24.0,
+):
+    """
+    🔍 Run all configured alerts and send Discord notifications.
+
+    Loops through every active alert, searches the configured route,
+    and fires webhook notifications for matching fares.
+
+    Typical cron setup (run every 6 hours):
+
+      0 */6 * * *  wombat-miles monitor
+
+    Examples:
+
+      wombat-miles monitor --dry-run   # preview without sending notifications
+
+      wombat-miles monitor --days 14 --verbose
+    """
+    if verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+
+    active_alerts = alerts_mod.list_alerts()
+    if not active_alerts:
+        console.print("[dim]No active alerts. Use `wombat-miles alert add` to create one.[/dim]")
+        return
+
+    console.print(
+        f"[bold]🔍 Running {len(active_alerts)} alert(s) "
+        f"{'[DRY RUN] ' if dry_run else ''}...[/bold]"
+    )
+
+    # Group alerts by unique route to avoid duplicate searches
+    route_groups: dict[tuple, list[alerts_mod.Alert]] = defaultdict(list)
+    for a in active_alerts:
+        route_groups[(a.origin, a.destination)].append(a)
+
+    today = date.today()
+    use_cache = not no_cache
+    total_triggered = 0
+    total_sent = 0
+
+    for (origin, destination), route_alerts in route_groups.items():
+        # Determine scraper program (use the alert's program or all if mixed)
+        progs = {a.program for a in route_alerts}
+        effective_program = list(progs)[0] if len(progs) == 1 else "all"
+        if program != "all":
+            effective_program = program
+
+        try:
+            scrapers = _get_scrapers(effective_program)
+        except SystemExit:
+            continue
+
+        dates_to_search = [
+            str(today + timedelta(days=i)) for i in range(days)
+        ]
+
+        console.print(
+            f"  [cyan]{origin} → {destination}[/cyan] "
+            f"({len(dates_to_search)} days, {effective_program})"
+        )
+
+        async def run_monitor_search(o, d, dts, s):
+            return await _search_dates_concurrent(
+                s, o, d, dts, cabin=None, use_cache=use_cache, concurrency=3
+            )
+
+        results = asyncio.run(run_monitor_search(origin, destination, dates_to_search, scrapers))
+
+        # Auto-record to price_history
+        try:
+            price_history.record_results(results)
+        except Exception as e:
+            logger.warning("price_history.record_results failed: %s", e)
+
+        # Check alerts
+        triggered = alerts_mod.check_alerts(results, alerts=route_alerts, dedup_hours=dedup_hours)
+        total_triggered += len(triggered)
+
+        for t in triggered:
+            new_low_badge = " [bold red]🔥 NEW LOW[/bold red]" if t.is_new_low else ""
+            console.print(
+                f"    🔔 Alert #{t.alert.id}: "
+                f"[bold]{t.flight_date}[/bold] "
+                f"{t.cabin.title()} {t.program} "
+                f"[green]{t.miles:,} miles[/green] + ${t.taxes_usd:.0f}"
+                f"{new_low_badge}"
+            )
+
+            sent = alerts_mod.fire_alert(t, dry_run=dry_run)
+            if sent and t.alert.discord_webhook and not dry_run:
+                console.print(f"      ✅ Discord notification sent")
+                total_sent += 1
+            elif dry_run:
+                console.print(f"      [dim](dry-run – notification skipped)[/dim]")
+
+    if total_triggered == 0:
+        console.print("[dim]No alerts triggered.[/dim]")
+    else:
+        console.print(
+            f"\n[bold green]✅ Done:[/bold green] "
+            f"{total_triggered} alert(s) triggered"
+            + (f", {total_sent} Discord notification(s) sent" if total_sent else "")
+            + (" [dim](dry-run)[/dim]" if dry_run else "")
+        )
 
 
 def main():

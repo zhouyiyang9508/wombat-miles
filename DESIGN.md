@@ -141,6 +141,21 @@ wombat-miles search SFO NRT 2024-06-01 --output results.json
 - [x] 价格趋势表支持相对颜色编码（绿=最低三分之一, 黄=中间, 红=最贵）
 - [x] 17 个单元测试全部通过
 
+### Phase 9: Discord/Webhook 告警系统 ✅ (2026-02-19)
+- [x] `wombat_miles/alerts.py`：SQLite 存储告警配置 + Discord Webhook 发送
+- [x] `alert add SFO NRT --class business --max-miles 70000 --webhook <url>` 命令
+- [x] `alert list` 命令：列出所有活跃告警（表格展示）
+- [x] `alert remove <id>` 命令：删除告警
+- [x] `alert history [id]` 命令：查看告警触发记录（dedup/审计日志）
+- [x] `monitor` 命令：扫描所有告警路线，触发时发 Discord Webhook
+  - `--dry-run`：预览不发送
+  - `--days N`：搜索未来 N 天（默认 7）
+  - `--dedup-hours N`：N 小时内同一结果不重复推送（默认 24h）
+  - 自动与 `price_history` 集成，检测历史新低并标注 🔥
+- [x] Discord Embed 格式：标题/颜色/里程/税费/新低标记/时间戳
+- [x] 25 个单元测试全部通过（mock webhook、dedup、route/cabin/program 过滤）
+- [x] 无需本地 IP，纯 SQLite + HTTP POST，cron 友好
+
 ## 后续改进计划（继续迭代）
 
 ### 数据源扩展
@@ -150,10 +165,10 @@ wombat-miles search SFO NRT 2024-06-01 --output results.json
 - Delta SkyMiles
 - Virgin Atlantic Flying Club
 
-### 功能增强（优先推荐：无需本地IP）
-- **Discord/邮件通知**：里程票出现或跌价时发送 Discord 告警，结合 cron 实现自动监控（★★★ 下一个优先）
+### 功能增强（无需本地IP）
+- **多城市搜索**：枢纽机场扩展（如 SFO/LAX/SEA 同时出发），一条命令搜多个出发地（★★★ 下一个优先）
 - **最优兑换建议**：输入手头里程，推荐最合算的路线/舱位（★★）
-- **多城市搜索**：枢纽机场扩展（如 SFO/LAX/SEA 同时出发）（★★）
+- **告警升级**：支持邮件（SMTP）通知，多 webhook（通知到多个频道）（★★）
 
 ### 界面升级
 - 交互式 TUI (textual 框架)：方向键浏览日历，实时过滤（★★）

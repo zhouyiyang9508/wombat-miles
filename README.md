@@ -139,6 +139,60 @@ When a new price low is detected vs. the last 30 days, a 🔔 alert is printed i
   SFO→NRT on 2025-06-15 (Business, alaska): 55,000 miles (was 70,000, ↓21.4%)
 ```
 
+### Alert System 🔔
+
+Set up automatic notifications for when award availability meets your criteria. Combines with `monitor` (run via cron) to get Discord pings when cheap business seats appear.
+
+```bash
+# Create an alert: notify when SFO→NRT business drops to ≤70k miles
+python -m wombat_miles alert add SFO NRT --class business --max-miles 70000 --webhook https://discord.com/api/webhooks/...
+
+# Alert on any availability (no miles threshold)
+python -m wombat_miles alert add SFO YYZ --class business
+
+# List configured alerts
+python -m wombat_miles alert list
+
+# Remove an alert by ID
+python -m wombat_miles alert remove 1
+
+# View alert fire history (audit log)
+python -m wombat_miles alert history
+python -m wombat_miles alert history 2  # for a specific alert
+```
+
+Run the monitor manually or via cron:
+
+```bash
+# Check all alert routes, send Discord notifications
+python -m wombat_miles monitor
+
+# Preview without sending notifications
+python -m wombat_miles monitor --dry-run
+
+# Search 14 days ahead, re-notify every 12 hours
+python -m wombat_miles monitor --days 14 --dedup-hours 12
+
+# Add to crontab — run every 6 hours:
+# 0 */6 * * * cd /path/to/wombat-miles && python -m wombat_miles monitor
+```
+
+When a match is found:
+- Fires a Discord **embed** with flight details (route, date, miles, taxes, departure/arrival times)
+- 🔥 **NEW LOW** badge + previous price shown when it's a historical minimum
+- Dedup logic prevents spamming (same fare won't re-notify within 24h by default)
+- All fired alerts are logged to `~/.wombat-miles/alerts.db` for auditing
+
+Example Discord embed content:
+```
+🦘 Award Alert: SFO → NRT 🔥 NEW LOW!
+🛋️ Business · 🌲 Alaska
+🗓️ 2025-06-05 · ✈ AS 1
+⏰ 10:00 → 14:30
+💰 65,000 miles + $85 taxes
+📉 Previous low: 72,000 miles (↓9.7%)
+```
+
 ### Cache Management
 
 ```bash
@@ -187,8 +241,9 @@ wombat-miles/
 │   │   └── aeroplan.py     # Aeroplan scraper
 │   ├── cache.py            # SQLite search result cache (4h TTL)
 │   ├── price_history.py    # Price history tracking + new-low detection
+│   ├── alerts.py           # Alert config + Discord webhook notifications
 │   └── formatter.py        # Rich terminal output
-├── tests/                  # Unit tests with mock data (56 tests)
+├── tests/                  # Unit tests with mock data (81 tests)
 ├── DESIGN.md               # Technical design document
 └── README.md
 ```
@@ -206,7 +261,8 @@ wombat-miles/
 - [x] CSV export (`-o results.csv`)
 - [x] Monthly calendar view (`calendar-view`)
 - [x] Price history tracking + new-low alerts (`history show / stats / clear`)
-- [ ] Discord alerts when price drops (combine with cron)
+- [x] Discord webhook alerts + `monitor` cron command (`alert add / list / remove / history`)
+- [ ] Multi-city hub search (SFO/LAX/SEA simultaneously)
 - [ ] Interactive TUI with `textual`
 
 ### More Programs
