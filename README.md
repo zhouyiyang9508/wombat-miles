@@ -108,6 +108,37 @@ Example output:
 Best price: 2025-06-05 — 45,000 miles (alaska)
 ```
 
+### Price History 📈
+
+Every search automatically records prices to a local SQLite database (`~/.wombat-miles/price_history.db`). Over time, this builds a trend dataset and detects when prices drop.
+
+```bash
+# View price history for a route (last 30 days)
+python -m wombat_miles history show SFO NRT --class business
+
+# Look back 60 days
+python -m wombat_miles history show SFO NRT --class business --days 60
+
+# Summary statistics (min/max/avg miles, first/last seen)
+python -m wombat_miles history stats SFO NRT
+
+# Clear history for a specific route
+python -m wombat_miles history clear SFO NRT
+
+# Clear ALL history
+python -m wombat_miles history clear --yes
+
+# Skip recording for a one-off search
+python -m wombat_miles search SFO NRT 2025-06-15 --no-history
+```
+
+When a new price low is detected vs. the last 30 days, a 🔔 alert is printed inline:
+
+```
+🔔 New Price Low Detected!
+  SFO→NRT on 2025-06-15 (Business, alaska): 55,000 miles (was 70,000, ↓21.4%)
+```
+
 ### Cache Management
 
 ```bash
@@ -149,15 +180,16 @@ Results are cached in SQLite (`~/.wombat-miles/cache.db`) with a 4-hour TTL to a
 ```
 wombat-miles/
 ├── wombat_miles/
-│   ├── cli.py          # CLI entry point (typer)
-│   ├── models.py       # Data models (Flight, FlightFare)
+│   ├── cli.py              # CLI entry point (typer)
+│   ├── models.py           # Data models (Flight, FlightFare)
 │   ├── scrapers/
-│   │   ├── alaska.py   # Alaska Atmos Rewards scraper
-│   │   └── aeroplan.py # Aeroplan scraper
-│   ├── cache.py        # SQLite caching
-│   └── formatter.py    # Rich terminal output
-├── tests/              # Unit tests with mock data
-├── DESIGN.md           # Technical design document
+│   │   ├── alaska.py       # Alaska Atmos Rewards scraper
+│   │   └── aeroplan.py     # Aeroplan scraper
+│   ├── cache.py            # SQLite search result cache (4h TTL)
+│   ├── price_history.py    # Price history tracking + new-low detection
+│   └── formatter.py        # Rich terminal output
+├── tests/                  # Unit tests with mock data (56 tests)
+├── DESIGN.md               # Technical design document
 └── README.md
 ```
 
@@ -173,8 +205,8 @@ wombat-miles/
 - [x] Connection/multi-segment flight support (`--stops N`)
 - [x] CSV export (`-o results.csv`)
 - [x] Monthly calendar view (`calendar-view`)
-- [ ] Price history tracking + change alerts
-- [ ] Email/Discord alerts when award space opens
+- [x] Price history tracking + new-low alerts (`history show / stats / clear`)
+- [ ] Discord alerts when price drops (combine with cron)
 - [ ] Interactive TUI with `textual`
 
 ### More Programs

@@ -131,6 +131,16 @@ wombat-miles search SFO NRT 2024-06-01 --output results.json
 - [x] Cabin 过滤（只显示对应舱位最优价格）
 - [x] 11 个单元测试全部通过
 
+### Phase 8: 价格历史追踪 ✅ (2026-02-19)
+- [x] `wombat_miles/price_history.py`：SQLite 存储所有搜索结果
+- [x] `search` 命令自动记录价格（可用 `--no-history` 跳过）
+- [x] 新低检测：与历史最低价比较，出现更低价格时在 CLI 醒目提示
+- [x] `history show SFO NRT --class business` 命令：显示路线价格趋势表
+- [x] `history stats SFO NRT` 命令：汇总统计（记录数、最低/最高/均价、首次/最近记录时间）
+- [x] `history clear [SFO NRT]` 命令：清除路线或全部历史
+- [x] 价格趋势表支持相对颜色编码（绿=最低三分之一, 黄=中间, 红=最贵）
+- [x] 17 个单元测试全部通过
+
 ## 后续改进计划（继续迭代）
 
 ### 数据源扩展
@@ -141,10 +151,9 @@ wombat-miles search SFO NRT 2024-06-01 --output results.json
 - Virgin Atlantic Flying Club
 
 ### 功能增强（优先推荐：无需本地IP）
-- **价格历史追踪 + SQLite 存储**：记录每次查询结果，检测价格变化趋势（★★★ 高优先级）
-- **Discord/邮件通知**：里程票出现或跌价时发送告警，可结合 cron 实现自动监控（★★★）
+- **Discord/邮件通知**：里程票出现或跌价时发送 Discord 告警，结合 cron 实现自动监控（★★★ 下一个优先）
 - **最优兑换建议**：输入手头里程，推荐最合算的路线/舱位（★★）
-- **多城市搜索**：枢纽机场扩展（如 SFO/LAX/SEA 出发）（★★）
+- **多城市搜索**：枢纽机场扩展（如 SFO/LAX/SEA 同时出发）（★★）
 
 ### 界面升级
 - 交互式 TUI (textual 框架)：方向键浏览日历，实时过滤（★★）

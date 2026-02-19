@@ -288,6 +288,77 @@ def results_to_csv(results: list[SearchResult], cabin_filter: Optional[str] = No
     return output.getvalue()
 
 
+def print_price_trend(
+    trend: list[dict],
+    stats: dict,
+    origin: str,
+    destination: str,
+    cabin_filter: Optional[str] = None,
+) -> None:
+    """Print price history as a rich table showing lowest miles per flight date."""
+    route = f"{origin} → {destination}"
+    cabin_label = cabin_filter.title() if cabin_filter else "All Cabins"
+
+    console.print(f"\n[bold blue]📈 Price History: {route}  |  {cabin_label}[/bold blue]")
+
+    if not trend:
+        console.print("[dim]No history data found. Run `wombat-miles search` first to build history.[/dim]\n")
+        return
+
+    # Compute thresholds for relative coloring
+    all_miles = [row["min_miles"] for row in trend]
+    if len(all_miles) >= 2:
+        sorted_m = sorted(all_miles)
+        n = len(sorted_m)
+        low_thresh = sorted_m[min(n // 3, n - 2)]
+        high_thresh = sorted_m[min((2 * n) // 3, n - 2)]
+    elif len(all_miles) == 1:
+        low_thresh = high_thresh = all_miles[0]
+    else:
+        low_thresh = high_thresh = 0
+
+    def miles_style(m: int) -> str:
+        if m <= low_thresh:
+            return "bold green"
+        elif m <= high_thresh:
+            return "yellow"
+        return "red"
+
+    table = Table(
+        box=box.ROUNDED,
+        show_header=True,
+        header_style="bold cyan",
+    )
+    table.add_column("Flight Date")
+    table.add_column("Cabin", justify="center")
+    table.add_column("Program")
+    table.add_column("Best Miles", justify="right")
+    table.add_column("Avg Taxes", justify="right")
+    table.add_column("Samples", justify="right")
+    table.add_column("Last Seen")
+
+    for row in trend:
+        style = miles_style(row["min_miles"])
+        table.add_row(
+            row["flight_date"],
+            Text(row["cabin"].title(), style=CABIN_STYLES.get(row["cabin"], "white")),
+            PROGRAM_LABELS.get(row["program"], row["program"]),
+            Text(f"{row['min_miles']:,}", style=style),
+            f"${row['avg_taxes']:.0f}" if row["avg_taxes"] is not None else "–",
+            str(row["sample_count"]),
+            row["last_seen"],
+        )
+
+    console.print(table)
+
+    if stats.get("total_records"):
+        console.print(
+            f"[dim]{stats['total_records']} total records  |  "
+            f"all-time low: [bold green]{stats['min_miles']:,} miles[/bold green]  |  "
+            f"tracking since {stats['first_seen']}[/dim]\n"
+        )
+
+
 def print_calendar_view(
     results: list[SearchResult],
     cabin_filter: Optional[str] = None,

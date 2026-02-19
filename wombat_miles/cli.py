@@ -10,12 +10,14 @@ import typer
 from rich.console import Console
 
 from . import cache
+from . import price_history
 from .formatter import (
     console,
     print_calendar_view,
     print_multi_date_summary,
     print_results,
     print_results_json,
+    print_price_trend,
     results_to_csv,
 )
 from .models import SearchResult
@@ -29,6 +31,9 @@ app = typer.Typer(
 
 cache_app = typer.Typer(help="Cache management commands")
 app.add_typer(cache_app, name="cache")
+
+history_app = typer.Typer(help="Price history commands")
+app.add_typer(history_app, name="history")
 
 logging.basicConfig(
     level=logging.WARNING,
@@ -172,6 +177,7 @@ def search(
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Verbose logging")] = False,
     stops: Annotated[int, typer.Option("--stops", help="Max stops (0=direct only, 1=one stop, etc.)")] = 0,
     summary: Annotated[bool, typer.Option("--summary", "-s", help="Show summary table for date ranges")] = False,
+    no_history: Annotated[bool, typer.Option("--no-history", help="Do not record prices to history DB")] = False,
 ):
     """
     🔍 Search for award flight availability.
@@ -251,6 +257,25 @@ def search(
             with open(output, "w") as fp:
                 json.dump(all_data, fp, indent=2)
             console.print(f"[green]Results saved to {output} (JSON)[/green]")
+
+    # Auto-record prices to history DB (unless disabled)
+    if not no_history:
+        try:
+            recorded = price_history.record_results(results, cabin)
+            logger.debug(f"Recorded {recorded} price snapshots to history.")
+            # Detect new lows vs. history
+            alerts = price_history.detect_new_lows(results, cabin)
+            if alerts:
+                console.print("\n[bold yellow]🔔 New Price Low Detected![/bold yellow]")
+                for alert in alerts:
+                    console.print(
+                        f"  [green]{alert['route']}[/green] on [cyan]{alert['flight_date']}[/cyan] "
+                        f"({alert['cabin'].title()}, {alert['program']}): "
+                        f"[bold green]{alert['new_miles']:,}[/bold green] miles "
+                        f"[dim](was {alert['old_miles']:,}, ↓{alert['drop_pct']}%)[/dim]"
+                    )
+        except Exception as e:
+            logger.warning(f"Price history recording failed: {e}")
 
     if len(results) > 1 and summary:
         print_multi_date_summary(results, cabin)
@@ -367,6 +392,107 @@ def cache_info():
         console.print(f"Cache size: {size_kb:.1f} KB")
     else:
         console.print("[dim]No cache file yet.[/dim]")
+
+
+# ---------------------------------------------------------------------------
+# history sub-commands
+# ---------------------------------------------------------------------------
+
+@history_app.command("show")
+def history_show(
+    origin: Annotated[str, typer.Argument(help="Origin airport code (e.g. SFO)")],
+    destination: Annotated[str, typer.Argument(help="Destination airport code (e.g. NRT)")],
+    cabin: Annotated[Optional[str], typer.Option("--class", "-c", help="Cabin: economy, business, first")] = None,
+    days: Annotated[int, typer.Option("--days", "-d", help="Look back N days")] = 30,
+):
+    """
+    📈 Show price history for a route.
+
+    Displays the lowest miles seen over time, grouped by flight date.
+
+    Example:
+
+      wombat-miles history show SFO NRT --class business --days 60
+    """
+    if cabin and cabin not in ("economy", "business", "first"):
+        console.print("[red]Invalid cabin. Choose: economy, business, first[/red]")
+        raise typer.Exit(1)
+
+    trend = price_history.get_price_trend(
+        origin.upper(), destination.upper(), cabin, lookback_days=days
+    )
+    stats = price_history.get_stats(origin.upper(), destination.upper(), cabin)
+
+    print_price_trend(trend, stats, origin.upper(), destination.upper(), cabin)
+
+
+@history_app.command("stats")
+def history_stats(
+    origin: Annotated[str, typer.Argument(help="Origin airport code")],
+    destination: Annotated[str, typer.Argument(help="Destination airport code")],
+    cabin: Annotated[Optional[str], typer.Option("--class", "-c", help="Cabin filter")] = None,
+):
+    """
+    📊 Show summary statistics for a route's price history.
+
+    Example:
+
+      wombat-miles history stats SFO NRT --class business
+    """
+    stats = price_history.get_stats(origin.upper(), destination.upper(), cabin)
+    route = f"{origin.upper()} → {destination.upper()}"
+    cabin_label = cabin.title() if cabin else "All Cabins"
+
+    console.print(f"\n[bold blue]📊 Price History Stats: {route}  |  {cabin_label}[/bold blue]")
+
+    if not stats.get("total_records"):
+        console.print("[dim]No history data found. Run `wombat-miles search` first.[/dim]\n")
+        return
+
+    from rich.table import Table
+    from rich import box as rich_box
+
+    table = Table(box=rich_box.ROUNDED, show_header=False, pad_edge=True)
+    table.add_column("Metric", style="bold cyan")
+    table.add_column("Value", justify="right")
+
+    table.add_row("Total records", str(stats["total_records"]))
+    table.add_row("Unique flight dates", str(stats["unique_flight_dates"]))
+    table.add_row("Min miles seen", f"{stats['min_miles']:,}" if stats.get("min_miles") else "–")
+    table.add_row("Max miles seen", f"{stats['max_miles']:,}" if stats.get("max_miles") else "–")
+    table.add_row("Avg miles", f"{stats['avg_miles']:,}" if stats.get("avg_miles") else "–")
+    table.add_row("First recorded", stats.get("first_seen") or "–")
+    table.add_row("Last recorded", stats.get("last_seen") or "–")
+
+    console.print(table)
+
+
+@history_app.command("clear")
+def history_clear(
+    origin: Annotated[Optional[str], typer.Argument(help="Origin (optional)")] = None,
+    destination: Annotated[Optional[str], typer.Argument(help="Destination (optional)")] = None,
+    confirm: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
+):
+    """
+    🗑  Clear price history.
+
+    Without arguments clears ALL history (asks for confirmation).
+    With origin+destination, clears only that route.
+
+    Example:
+
+      wombat-miles history clear SFO NRT
+
+      wombat-miles history clear --yes
+    """
+    if origin and destination:
+        count = price_history.clear_history(origin.upper(), destination.upper())
+        console.print(f"[green]Cleared {count} records for {origin.upper()}→{destination.upper()}.[/green]")
+    else:
+        if not confirm:
+            typer.confirm("Clear ALL price history?", abort=True)
+        count = price_history.clear_history()
+        console.print(f"[green]Cleared {count} total price history records.[/green]")
 
 
 def main():
