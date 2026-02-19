@@ -76,6 +76,38 @@ python -m wombat_miles search SFO NRT 2025-06-15 -v
 python -m wombat_miles search SFO NRT 2025-06-15 --no-cache
 ```
 
+### Calendar View 📅
+
+See a full month of availability at a glance. Each cell shows the cheapest available award price. Colors are **relative** — green = cheapest days, yellow = moderate, red = expensive.
+
+```bash
+# Show June 2025 availability (business class)
+python -m wombat_miles calendar-view SFO NRT 2025-06 --class business
+
+# Aeroplan only, two consecutive months
+python -m wombat_miles calendar-view SFO YYZ 2025-07 --program aeroplan --months 2
+
+# Include 1-stop connections, no cabin filter
+python -m wombat_miles calendar-view SEA NRT 2025-08 --stops 1
+```
+
+Example output:
+```
+✈  SFO → NRT  |  June 2025  |  Business
+
+   Mon      Tue      Wed      Thu      Fri      Sat      Sun
+ ─────────────────────────────────────────────────────────────
+                                                         1
+                                                        55k
+   2        3        4        5        6        7        8
+   –        –        –       45k       –        –        –
+   9       10       11       12       13       14       15
+   –       60k       –        –        –        –       70k
+  ...
+6/30 days with availability.
+Best price: 2025-06-05 — 45,000 miles (alaska)
+```
+
 ### Cache Management
 
 ```bash
@@ -140,9 +172,10 @@ wombat-miles/
 ### Near-term
 - [x] Connection/multi-segment flight support (`--stops N`)
 - [x] CSV export (`-o results.csv`)
-- [ ] Interactive TUI with `textual`
+- [x] Monthly calendar view (`calendar-view`)
+- [ ] Price history tracking + change alerts
 - [ ] Email/Discord alerts when award space opens
-- [ ] Auto-search popular routes on schedule
+- [ ] Interactive TUI with `textual`
 
 ### More Programs
 - [ ] United MileagePlus

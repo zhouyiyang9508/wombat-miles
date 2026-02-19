@@ -12,6 +12,7 @@ from rich.console import Console
 from . import cache
 from .formatter import (
     console,
+    print_calendar_view,
     print_multi_date_summary,
     print_results,
     print_results_json,
@@ -221,6 +222,90 @@ def search(
     if not output:
         for result in results:
             print_results(result, cabin)
+
+
+@app.command()
+def calendar_view(
+    origin: Annotated[str, typer.Argument(help="Origin airport code (e.g. SFO)")],
+    destination: Annotated[str, typer.Argument(help="Destination airport code (e.g. NRT)")],
+    month: Annotated[Optional[str], typer.Argument(help="Month in YYYY-MM format (default: next month)")] = None,
+    cabin: Annotated[Optional[str], typer.Option("--class", "-c", help="Cabin: economy, business, first")] = None,
+    program: Annotated[str, typer.Option("--program", "-p", help="Program: alaska, aeroplan, all")] = "all",
+    no_cache: Annotated[bool, typer.Option("--no-cache", help="Skip cache")] = False,
+    verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Verbose logging")] = False,
+    stops: Annotated[int, typer.Option("--stops", help="Max stops (0=direct only)")] = 0,
+    months: Annotated[int, typer.Option("--months", "-m", help="Number of months to display")] = 1,
+):
+    """
+    📅 Show award availability as a monthly calendar grid.
+
+    Each cell shows the best available miles price.
+    Colors: [bold green]green=cheap[/bold green], [yellow]yellow=moderate[/yellow], [red]red=expensive[/red], dim=no availability.
+
+    Examples:
+
+      wombat-miles calendar-view SFO NRT 2025-06 --class business
+
+      wombat-miles calendar-view SFO YYZ 2025-07 --program aeroplan --months 2
+
+      wombat-miles calendar-view SFO NRT --class business   (searches next month)
+    """
+    import calendar as cal_mod
+
+    if verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+
+    if cabin and cabin not in ("economy", "business", "first"):
+        console.print("[red]Invalid cabin. Choose: economy, business, first[/red]")
+        raise typer.Exit(1)
+
+    scrapers = _get_scrapers(program)
+
+    # Parse start month
+    if month:
+        try:
+            start_date = date.fromisoformat(f"{month}-01")
+        except ValueError:
+            console.print(f"[red]Invalid month format: {month}. Use YYYY-MM (e.g. 2025-06)[/red]")
+            raise typer.Exit(1)
+    else:
+        today = date.today()
+        # Default to next month
+        if today.month == 12:
+            start_date = date(today.year + 1, 1, 1)
+        else:
+            start_date = date(today.year, today.month + 1, 1)
+
+    # Build all dates across requested months
+    dates_to_search = []
+    for m_offset in range(months):
+        # Advance by m_offset months
+        target_year = start_date.year + (start_date.month - 1 + m_offset) // 12
+        target_month = (start_date.month - 1 + m_offset) % 12 + 1
+        _, days_in_month = cal_mod.monthrange(target_year, target_month)
+        for d in range(1, days_in_month + 1):
+            dates_to_search.append(f"{target_year}-{target_month:02d}-{d:02d}")
+
+    use_cache = not no_cache
+
+    console.print(
+        f"[bold]Scanning {len(dates_to_search)} days for "
+        f"{origin.upper()} → {destination.upper()}...[/bold]"
+    )
+
+    async def run_all():
+        all_results = []
+        for search_date in dates_to_search:
+            result = await _search_date(
+                scrapers, origin.upper(), destination.upper(),
+                search_date, cabin, use_cache, max_stops=stops,
+            )
+            all_results.append(result)
+        return all_results
+
+    results = asyncio.run(run_all())
+
+    print_calendar_view(results, cabin, origin.upper(), destination.upper())
 
 
 @cache_app.command("clear")

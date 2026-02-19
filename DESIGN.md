@@ -118,12 +118,20 @@ wombat-miles search SFO NRT 2024-06-01 --output results.json
 - [x] cache 管理命令（info/clear/clear --expired）
 
 ### Phase 6: README + 测试 ✅
-- [ ] 完善 README（安装/使用说明）
-- [ ] 基本单测
-- [ ] 端到端测试
-- [ ] 推送到 GitHub
+- [x] 完善 README（安装/使用说明）
+- [x] 基本单测
+- [x] 推送到 GitHub
 
-## 后续改进计划（第一版完成后）
+### Phase 7: 日历视图 ✅ (2026-02-19)
+- [x] `calendar-view` 命令（`wombat-miles calendar-view SFO NRT 2025-06 --class business`）
+- [x] 月度日历网格展示（7列×周行）
+- [x] 相对价格颜色编码（绿=便宜, 黄=中等, 红=贵, 灰=无可用）
+- [x] 跨月支持（`--months 2` 显示连续多月）
+- [x] 最佳日期摘要（统计可用天数 + 最低价日期）
+- [x] Cabin 过滤（只显示对应舱位最优价格）
+- [x] 11 个单元测试全部通过
+
+## 后续改进计划（继续迭代）
 
 ### 数据源扩展
 - United MileagePlus
@@ -132,17 +140,16 @@ wombat-miles search SFO NRT 2024-06-01 --output results.json
 - Delta SkyMiles
 - Virgin Atlantic Flying Club
 
-### 功能增强
-- 多城市搜索（枢纽扩展）
-- 日历视图（显示一个月的可用情况）
-- 价格历史追踪 + 告警
-- 邮件/Discord 通知（里程票出现时）
-- 自动搜索热门路线
+### 功能增强（优先推荐：无需本地IP）
+- **价格历史追踪 + SQLite 存储**：记录每次查询结果，检测价格变化趋势（★★★ 高优先级）
+- **Discord/邮件通知**：里程票出现或跌价时发送告警，可结合 cron 实现自动监控（★★★）
+- **最优兑换建议**：输入手头里程，推荐最合算的路线/舱位（★★）
+- **多城市搜索**：枢纽机场扩展（如 SFO/LAX/SEA 出发）（★★）
 
 ### 界面升级
-- Web UI (FastAPI + 简单前端)
-- 交互式 TUI (textual 框架)
+- 交互式 TUI (textual 框架)：方向键浏览日历，实时过滤（★★）
+- Web UI (FastAPI + 简单前端)（★）
 
 ### 其他
-- 里程票价格对比（同一航班不同计划的成本）
-- 最优兑换建议（根据你手头的里程）
+- 里程票价格对比（同一航班不同计划的成本对比表）
+- 最优兑换建议（根据你手头的里程余额）

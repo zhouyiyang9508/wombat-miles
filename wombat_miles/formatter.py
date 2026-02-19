@@ -1,8 +1,10 @@
 """Output formatting for award search results."""
 
+import calendar
 import csv
 import io
 import json
+from datetime import date
 from typing import Optional
 
 from rich.console import Console
@@ -284,3 +286,119 @@ def results_to_csv(results: list[SearchResult], cabin_filter: Optional[str] = No
                 ])
 
     return output.getvalue()
+
+
+def print_calendar_view(
+    results: list[SearchResult],
+    cabin_filter: Optional[str] = None,
+    origin: str = "",
+    destination: str = "",
+) -> None:
+    """Print award availability as a monthly calendar grid.
+
+    Each cell shows the best available miles price for that day.
+    Colors are relative: green=cheap, yellow=moderate, red=expensive.
+    Dim cells = searched but no availability found.
+    """
+    if not results:
+        console.print("[dim]No results to display.[/dim]")
+        return
+
+    # Build date -> (best_miles, best_program, cabin) map
+    date_fares: dict[str, tuple[int, str, str]] = {}
+    for result in results:
+        best_miles = None
+        best_program = None
+        best_cabin = None
+        for flight in result.flights:
+            fare = flight.best_fare(cabin_filter)
+            if fare and (best_miles is None or fare.miles < best_miles):
+                best_miles = fare.miles
+                best_program = fare.program
+                best_cabin = fare.cabin
+        if best_miles is not None:
+            date_fares[result.date] = (best_miles, best_program or "", best_cabin or "")
+
+    # Compute price thresholds for relative coloring
+    all_prices = [v[0] for v in date_fares.values()]
+    if all_prices:
+        sorted_prices = sorted(all_prices)
+        n = len(sorted_prices)
+        low_thresh = sorted_prices[n // 3]
+        high_thresh = sorted_prices[(2 * n) // 3]
+    else:
+        low_thresh = high_thresh = 0
+
+    def price_style(miles: int) -> str:
+        if miles <= low_thresh:
+            return "bold green"
+        elif miles <= high_thresh:
+            return "yellow"
+        else:
+            return "red"
+
+    # Group results by (year, month)
+    months_seen: list[tuple[int, int]] = []
+    for result in results:
+        d = date.fromisoformat(result.date)
+        key = (d.year, d.month)
+        if key not in months_seen:
+            months_seen.append(key)
+
+    cabin_label = cabin_filter.title() if cabin_filter else "All Cabins"
+    route_label = f"{origin} → {destination}" if (origin and destination) else ""
+
+    total_avail = len(date_fares)
+    total_searched = len(results)
+
+    for year, month in months_seen:
+        month_name = calendar.month_name[month]
+        title = f"✈  {route_label}  |  {month_name} {year}  |  {cabin_label}"
+        console.print(f"\n[bold blue]{title}[/bold blue]")
+
+        table = Table(
+            box=box.SIMPLE_HEAD,
+            show_header=True,
+            header_style="bold cyan",
+            padding=(0, 1),
+        )
+        day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        for day in day_names:
+            table.add_column(day, justify="center", width=9)
+
+        cal_weeks = calendar.monthcalendar(year, month)
+        for week in cal_weeks:
+            row_cells = []
+            for day_num in week:
+                if day_num == 0:
+                    row_cells.append(Text(""))
+                    continue
+                date_str = f"{year}-{month:02d}-{day_num:02d}"
+                if date_str in date_fares:
+                    miles, program, cab = date_fares[date_str]
+                    miles_k = f"{miles // 1000}k"
+                    style = price_style(miles)
+                    cell = Text(f"{day_num:2d}\n{miles_k}", style=style)
+                else:
+                    searched = any(r.date == date_str for r in results)
+                    if searched:
+                        cell = Text(f"{day_num:2d}\n–", style="dim")
+                    else:
+                        cell = Text(f"{day_num:2d}", style="dim")
+                row_cells.append(cell)
+            table.add_row(*row_cells)
+
+        console.print(table)
+
+    # Summary footer
+    console.print(
+        f"[dim]{total_avail}/{total_searched} days with availability.[/dim]"
+    )
+    if date_fares:
+        best_day, (best_miles, best_prog, _) = min(
+            date_fares.items(), key=lambda x: x[1][0]
+        )
+        console.print(
+            f"[bold]Best price:[/bold] [yellow]{best_day}[/yellow] — "
+            f"[bold green]{best_miles:,} miles[/bold green] ({best_prog})\n"
+        )
