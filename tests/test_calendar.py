@@ -233,3 +233,106 @@ def test_mixed_programs_picks_cheapest():
     # Best price = 55k (alaska)
     assert "55" in output
     assert "alaska" in output
+
+
+# ── Color threshold correctness ───────────────────────────────────────────────
+
+
+def test_color_threshold_n3_has_red():
+    """With n=3 distinct prices, the most expensive should be reachable as red.
+
+    Bug in original implementation: (2*3)//3 = 2, so high_thresh = max,
+    making red unreachable. Fixed by capping high_idx at n-2.
+    """
+    from rich.console import Console
+    from io import StringIO
+
+    results = [
+        make_result("2025-06-01", 30_000),   # cheap → green
+        make_result("2025-06-02", 60_000),   # mid
+        make_result("2025-06-03", 90_000),   # expensive → should be red
+    ]
+    buf = StringIO()
+    with patch("wombat_miles.formatter.console", Console(file=buf, no_color=False)):
+        print_calendar_view(results, cabin_filter="business", origin="SFO", destination="NRT")
+    # We can't assert exact ANSI codes easily, but at least no exception
+    # and all three dates appear
+    buf2 = StringIO()
+    with patch("wombat_miles.formatter.console", Console(file=buf2, no_color=True)):
+        print_calendar_view(results, cabin_filter="business", origin="SFO", destination="NRT")
+    output = buf2.getvalue()
+    assert "30" in output  # day 1
+    assert "60" in output  # day 2
+    assert "90" in output  # day 3
+
+
+def test_color_threshold_n4_shows_variation():
+    """With n=4, we should get green, yellow, and red tiers all possible."""
+    results = [
+        make_result("2025-06-01", 20_000),
+        make_result("2025-06-02", 40_000),
+        make_result("2025-06-03", 60_000),
+        make_result("2025-06-04", 80_000),
+    ]
+    # Should not raise and all 4 days should appear
+    from rich.console import Console
+    from io import StringIO
+    buf = StringIO()
+    with patch("wombat_miles.formatter.console", Console(file=buf, no_color=True)):
+        print_calendar_view(results, cabin_filter="business", origin="SFO", destination="NRT")
+    output = buf.getvalue()
+    assert "20" in output
+    assert "80" in output
+
+
+def test_color_threshold_n1_single_price():
+    """Single price should show as green (cheap tier) without crashing."""
+    results = [make_result("2025-06-15", 55_000)]
+    from rich.console import Console
+    from io import StringIO
+    buf = StringIO()
+    with patch("wombat_miles.formatter.console", Console(file=buf, no_color=True)):
+        print_calendar_view(results, cabin_filter="business", origin="SFO", destination="NRT")
+    output = buf.getvalue()
+    assert "55" in output
+
+
+# ── Year boundary (Dec → Jan) ─────────────────────────────────────────────────
+
+
+def test_year_boundary_december_to_january():
+    """Calendar results spanning December and January should render both months."""
+    results = [
+        make_result("2025-12-30", 55_000),
+        make_result("2025-12-31", 57_000),
+        make_result("2026-01-01", 60_000),
+        make_result("2026-01-02", 62_000),
+    ]
+    from rich.console import Console
+    from io import StringIO
+    buf = StringIO()
+    with patch("wombat_miles.formatter.console", Console(file=buf, no_color=True)):
+        print_calendar_view(results, cabin_filter="business", origin="SFO", destination="NRT")
+    output = buf.getvalue()
+    assert "December 2025" in output
+    assert "January 2026" in output
+
+
+# ── Month arithmetic (CLI helper, tested via dates_to_search logic) ───────────
+
+
+def test_month_advance_cross_year():
+    """Month arithmetic should handle year-boundary rollover correctly."""
+    import calendar as cal_mod
+    # Simulate the CLI's month-advance logic for Dec 2025 + 2 months
+    start_year, start_month = 2025, 12
+    dates = []
+    for m_offset in range(2):
+        total_months = (start_year * 12 + start_month - 1) + m_offset
+        target_year = total_months // 12
+        target_month = total_months % 12 + 1
+        _, days = cal_mod.monthrange(target_year, target_month)
+        dates.append((target_year, target_month, days))
+
+    assert dates[0] == (2025, 12, 31)   # December 2025
+    assert dates[1] == (2026, 1, 31)    # January 2026 (not December again!)

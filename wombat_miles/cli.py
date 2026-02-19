@@ -121,6 +121,42 @@ async def _search_date(
     )
 
 
+async def _search_dates_concurrent(
+    scrapers,
+    origin: str,
+    destination: str,
+    dates: list[str],
+    cabin: Optional[str],
+    use_cache: bool,
+    max_stops: int = 0,
+    concurrency: int = 5,
+) -> list[SearchResult]:
+    """Search multiple dates concurrently with a semaphore rate limit.
+
+    Uses a semaphore to cap simultaneous open browser contexts.
+    Cached dates are returned immediately; only uncached dates use browser slots.
+    """
+    sem = asyncio.Semaphore(concurrency)
+
+    async def bounded_search(search_date: str) -> SearchResult:
+        # Check cache first — no browser needed
+        all_cached = True
+        for scraper in scrapers:
+            key = cache.make_key(scraper.program_name, origin, destination, search_date)
+            if not use_cache or cache.get(key) is None:
+                all_cached = False
+                break
+
+        if all_cached:
+            return await _search_date(scrapers, origin, destination, search_date, cabin, use_cache, max_stops)
+
+        async with sem:
+            return await _search_date(scrapers, origin, destination, search_date, cabin, use_cache, max_stops)
+
+    tasks = [bounded_search(d) for d in dates]
+    return await asyncio.gather(*tasks)
+
+
 @app.command()
 def search(
     origin: Annotated[str, typer.Argument(help="Origin airport code (e.g. SFO)")],
@@ -276,12 +312,13 @@ def calendar_view(
         else:
             start_date = date(today.year, today.month + 1, 1)
 
-    # Build all dates across requested months
+    # Build all dates across requested months using dateutil-safe arithmetic
     dates_to_search = []
     for m_offset in range(months):
-        # Advance by m_offset months
-        target_year = start_date.year + (start_date.month - 1 + m_offset) // 12
-        target_month = (start_date.month - 1 + m_offset) % 12 + 1
+        # Compute target year and month safely (handles Dec→Jan rollover correctly)
+        total_months = (start_date.year * 12 + start_date.month - 1) + m_offset
+        target_year = total_months // 12
+        target_month = total_months % 12 + 1
         _, days_in_month = cal_mod.monthrange(target_year, target_month)
         for d in range(1, days_in_month + 1):
             dates_to_search.append(f"{target_year}-{target_month:02d}-{d:02d}")
@@ -294,14 +331,13 @@ def calendar_view(
     )
 
     async def run_all():
-        all_results = []
-        for search_date in dates_to_search:
-            result = await _search_date(
-                scrapers, origin.upper(), destination.upper(),
-                search_date, cabin, use_cache, max_stops=stops,
-            )
-            all_results.append(result)
-        return all_results
+        # Use concurrent search (up to 5 simultaneous browser contexts)
+        # Cached results are served immediately without consuming a browser slot.
+        return await _search_dates_concurrent(
+            scrapers, origin.upper(), destination.upper(),
+            dates_to_search, cabin, use_cache,
+            max_stops=stops, concurrency=5,
+        )
 
     results = asyncio.run(run_all())
 

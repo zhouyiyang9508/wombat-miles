@@ -319,13 +319,23 @@ def print_calendar_view(
         if best_miles is not None:
             date_fares[result.date] = (best_miles, best_program or "", best_cabin or "")
 
-    # Compute price thresholds for relative coloring
+    # Compute price thresholds for relative coloring (tercile-based).
+    # Use (n-1) guard so that when n is small (1-3), the top tier is always
+    # reachable: high_thresh index is capped at n-2 so sorted_prices[-1] > it.
     all_prices = [v[0] for v in date_fares.values()]
-    if all_prices:
+    if len(all_prices) >= 2:
         sorted_prices = sorted(all_prices)
         n = len(sorted_prices)
-        low_thresh = sorted_prices[n // 3]
-        high_thresh = sorted_prices[(2 * n) // 3]
+        # Low threshold: bottom ~1/3 (index n//3, but at most n-2)
+        low_idx = min(n // 3, n - 2)
+        # High threshold: bottom ~2/3 (index (2n)//3, but at most n-2)
+        # so the top element is always > high_thresh → always shows red
+        high_idx = min((2 * n) // 3, n - 2)
+        low_thresh = sorted_prices[low_idx]
+        high_thresh = sorted_prices[high_idx]
+    elif len(all_prices) == 1:
+        # Single price — always show as green (best available)
+        low_thresh = high_thresh = all_prices[0]
     else:
         low_thresh = high_thresh = 0
 
@@ -350,6 +360,9 @@ def print_calendar_view(
 
     total_avail = len(date_fares)
     total_searched = len(results)
+
+    # Pre-build set of all searched dates for O(1) lookup in the cell loop
+    searched_dates: set[str] = {r.date for r in results}
 
     for year, month in months_seen:
         month_name = calendar.month_name[month]
@@ -380,8 +393,7 @@ def print_calendar_view(
                     style = price_style(miles)
                     cell = Text(f"{day_num:2d}\n{miles_k}", style=style)
                 else:
-                    searched = any(r.date == date_str for r in results)
-                    if searched:
+                    if date_str in searched_dates:
                         cell = Text(f"{day_num:2d}\n–", style="dim")
                     else:
                         cell = Text(f"{day_num:2d}", style="dim")
