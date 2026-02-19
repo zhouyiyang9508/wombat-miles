@@ -4,6 +4,7 @@ import calendar
 import csv
 import io
 import json
+from collections import defaultdict
 from datetime import date
 from typing import Optional
 
@@ -485,3 +486,131 @@ def print_calendar_view(
             f"[bold]Best price:[/bold] [yellow]{best_day}[/yellow] — "
             f"[bold green]{best_miles:,} miles[/bold green] ({best_prog})\n"
         )
+
+
+def print_multi_city_results(
+    all_results: dict[str, list[SearchResult]],
+    cabin_filter: Optional[str] = None,
+    destination: str = "",
+    search_date: str = "",
+) -> None:
+    """Print multi-city search results with comparison table.
+    
+    Args:
+        all_results: Dict mapping origin -> list[SearchResult]
+        cabin_filter: Cabin class filter (if any)
+        destination: Destination airport code
+        search_date: Search date or date range
+    """
+    if not all_results:
+        console.print("[dim]No results to display.[/dim]")
+        return
+
+    # Build comparison data: (origin, flight, fare) tuples
+    comparison_data: list[tuple[str, Flight, FlightFare]] = []
+    
+    for origin, results in all_results.items():
+        for result in results:
+            for flight in result.flights:
+                fares = flight.fares
+                if cabin_filter:
+                    fares = [f for f in fares if f.cabin == cabin_filter]
+                for fare in fares:
+                    comparison_data.append((origin, flight, fare))
+
+    if not comparison_data:
+        console.print("[dim]No flights found matching criteria.[/dim]")
+        return
+
+    # Sort by miles (best deals first)
+    comparison_data.sort(key=lambda x: x[2].miles)
+
+    # Print header
+    cabin_label = f" | {cabin_filter.title()}" if cabin_filter else ""
+    title = f"✈  Multi-City Search: → {destination}  |  {search_date}{cabin_label}"
+    console.print(f"\n[bold blue]{title}[/bold blue]")
+
+    # Summary table
+    console.print("\n[bold]📊 Best Options by Origin:[/bold]")
+    summary_table = Table(
+        box=box.ROUNDED,
+        show_header=True,
+        header_style="bold cyan",
+    )
+    summary_table.add_column("Origin", style="bold")
+    summary_table.add_column("Best Miles", justify="right", style="green")
+    summary_table.add_column("Taxes", justify="right")
+    summary_table.add_column("Cabin")
+    summary_table.add_column("Program")
+    summary_table.add_column("Flights", justify="right")
+
+    # Compute best by origin
+    origin_best: dict[str, tuple[int, float, str, str, int]] = {}
+    origin_count: dict[str, int] = defaultdict(int)
+    
+    for origin, flight, fare in comparison_data:
+        origin_count[origin] += 1
+        if origin not in origin_best or fare.miles < origin_best[origin][0]:
+            origin_best[origin] = (fare.miles, fare.cash, fare.cabin, fare.program, origin_count[origin])
+
+    for origin in sorted(origin_best.keys()):
+        miles, cash, cabin, program, count = origin_best[origin]
+        cabin_text = Text(cabin.title(), style=CABIN_STYLES.get(cabin, "white"))
+        program_label = PROGRAM_LABELS.get(program, program)
+        summary_table.add_row(
+            origin,
+            format_miles(miles),
+            format_cash(cash),
+            cabin_text,
+            program_label,
+            str(count),
+        )
+
+    console.print(summary_table)
+
+    # Detailed results table
+    console.print(f"\n[bold]🔍 Top {min(20, len(comparison_data))} Deals:[/bold]")
+    detail_table = Table(
+        box=box.ROUNDED,
+        show_header=True,
+        header_style="bold cyan",
+    )
+    detail_table.add_column("Origin", no_wrap=True)
+    detail_table.add_column("Flight", style="white", no_wrap=True)
+    detail_table.add_column("Departs", no_wrap=True)
+    detail_table.add_column("Arrives", no_wrap=True)
+    detail_table.add_column("Duration", justify="right")
+    detail_table.add_column("Stops", justify="center")
+    detail_table.add_column("Miles", justify="right", style="bold")
+    detail_table.add_column("Taxes", justify="right")
+    detail_table.add_column("Cabin", justify="center")
+    detail_table.add_column("Program")
+
+    # Show top 20 results
+    for origin, flight, fare in comparison_data[:20]:
+        cabin_text = Text(fare.cabin.title(), style=CABIN_STYLES.get(fare.cabin, "white"))
+        program_label = PROGRAM_LABELS.get(fare.program, fare.program)
+        stops_display = flight.stops_display()
+        stops_style = "green" if flight.is_direct else ("yellow" if flight.stops == 1 else "red")
+        stops_text = Text(stops_display, style=stops_style)
+
+        detail_table.add_row(
+            f"[bold cyan]{origin}[/bold cyan]",
+            flight.flight_no,
+            flight.departure[11:16] if len(flight.departure) > 10 else flight.departure,
+            flight.arrival[11:16] if len(flight.arrival) > 10 else flight.arrival,
+            flight.format_duration(),
+            stops_text,
+            format_miles(fare.miles),
+            format_cash(fare.cash),
+            cabin_text,
+            program_label,
+        )
+
+    console.print(detail_table)
+    
+    total_flights = len(comparison_data)
+    total_origins = len(all_results)
+    console.print(
+        f"\n[dim]{total_flights} total option(s) from {total_origins} origin(s).[/dim]\n"
+    )

@@ -16,6 +16,7 @@ from . import alerts as alerts_mod
 from .formatter import (
     console,
     print_calendar_view,
+    print_multi_city_results,
     print_multi_date_summary,
     print_results,
     print_results_json,
@@ -372,6 +373,118 @@ def calendar_view(
     results = asyncio.run(run_all())
 
     print_calendar_view(results, cabin, origin.upper(), destination.upper())
+
+
+@app.command()
+def multi_city(
+    origins: Annotated[str, typer.Argument(help="Comma-separated origin airports (e.g. SFO,LAX,SEA)")],
+    destination: Annotated[str, typer.Argument(help="Destination airport code (e.g. NRT)")],
+    date_str: Annotated[Optional[str], typer.Argument(help="Date in YYYY-MM-DD format")] = None,
+    cabin: Annotated[Optional[str], typer.Option("--class", "-c", help="Cabin class: economy, business, first")] = None,
+    program: Annotated[str, typer.Option("--program", "-p", help="Program: alaska, aeroplan, all")] = "all",
+    days: Annotated[int, typer.Option("--days", "-d", help="Search N days starting from date")] = 1,
+    no_cache: Annotated[bool, typer.Option("--no-cache", help="Skip cache")] = False,
+    verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Verbose logging")] = False,
+    stops: Annotated[int, typer.Option("--stops", help="Max stops (0=direct only, 1=one stop, etc.)")] = 0,
+    output: Annotated[Optional[str], typer.Option("-o", help="Output file path (JSON)")] = None,
+):
+    """
+    🌍 Search multiple origin cities to find the best award flight deals.
+
+    Compares flights from different origins to the same destination,
+    showing which city offers the best miles redemption value.
+
+    Examples:
+
+      wombat-miles multi-city SFO,LAX,SEA NRT 2025-06-01 --class business
+
+      wombat-miles multi-city "SFO,OAK,SJC" NRT 2025-06-15 --program alaska --days 3
+
+      wombat-miles multi-city SFO,LAX YYZ --start 2025-07-01 --class business
+    """
+    if verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+
+    if cabin and cabin not in ("economy", "business", "first"):
+        console.print("[red]Invalid cabin. Choose: economy, business, first[/red]")
+        raise typer.Exit(1)
+
+    # Parse origins (comma-separated)
+    origin_list = [o.strip().upper() for o in origins.split(",") if o.strip()]
+    if not origin_list:
+        console.print("[red]No valid origins provided. Use comma-separated codes like: SFO,LAX,SEA[/red]")
+        raise typer.Exit(1)
+
+    if len(origin_list) < 2:
+        console.print("[yellow]Only one origin provided. Consider using `wombat-miles search` instead.[/yellow]")
+
+    scrapers = _get_scrapers(program)
+
+    # Build list of dates to search
+    if not date_str:
+        console.print("[yellow]No date specified. Use: wombat-miles multi-city SFO,LAX NRT 2025-06-01[/yellow]")
+        raise typer.Exit(1)
+
+    dates_to_search = []
+    start_date = date.fromisoformat(date_str)
+    for i in range(days):
+        dates_to_search.append(str(start_date + timedelta(days=i)))
+
+    use_cache = not no_cache
+    destination_upper = destination.upper()
+
+    # Search each origin
+    all_results: dict[str, list[SearchResult]] = {}
+
+    async def run_all():
+        for origin_code in origin_list:
+            console.print(
+                f"[dim]Searching {origin_code} → {destination_upper} "
+                f"({len(dates_to_search)} day(s))...[/dim]"
+            )
+            origin_results = []
+            for search_date in dates_to_search:
+                result = await _search_date(
+                    scrapers, origin_code, destination_upper,
+                    search_date, cabin, use_cache, max_stops=stops
+                )
+                origin_results.append(result)
+            all_results[origin_code] = origin_results
+        return all_results
+
+    asyncio.run(run_all())
+
+    # Output
+    date_range_str = (
+        f"{dates_to_search[0]}" if len(dates_to_search) == 1
+        else f"{dates_to_search[0]} to {dates_to_search[-1]}"
+    )
+
+    if output:
+        import json
+        import dataclasses
+        export_data = {}
+        for origin_code, results in all_results.items():
+            origin_flights = []
+            for r in results:
+                for f in r.flights:
+                    fares = f.fares
+                    if cabin:
+                        fares = [fa for fa in fares if fa.cabin == cabin]
+                    if not fares:
+                        continue
+                    fd = dataclasses.asdict(f)
+                    fd["fares"] = [dataclasses.asdict(fa) for fa in fares]
+                    fd["date"] = r.date
+                    origin_flights.append(fd)
+            export_data[origin_code] = origin_flights
+
+        with open(output, "w") as fp:
+            json.dump(export_data, fp, indent=2)
+        console.print(f"[green]Results saved to {output} (JSON)[/green]")
+
+    if not output:
+        print_multi_city_results(all_results, cabin, destination_upper, date_range_str)
 
 
 @cache_app.command("clear")

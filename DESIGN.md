@@ -156,6 +156,18 @@ wombat-miles search SFO NRT 2024-06-01 --output results.json
 - [x] 25 个单元测试全部通过（mock webhook、dedup、route/cabin/program 过滤）
 - [x] 无需本地 IP，纯 SQLite + HTTP POST，cron 友好
 
+### Phase 10: 多城市搜索 ✅ (2026-02-19)
+- [x] `multi-city` 命令：支持逗号分隔的多个出发城市（如 `SFO,LAX,SEA`）
+- [x] 并行搜索所有路线，自动汇总结果
+- [x] 按里程价格排序，显示最优选项
+- [x] 双表格输出：
+  - 📊 摘要表：每个出发城市的最佳价格 + 可用航班数
+  - 🔍 详细表：Top 20 最优航班（跨所有城市比较）
+- [x] 结果表格清楚标注出发城市（彩色高亮）
+- [x] 支持所有现有参数：`--class`, `--program`, `--days`, `--stops`, `-o` (JSON 导出)
+- [x] 复用现有 cache、scraper 逻辑，无需本地 IP
+- [x] 4 个单元测试全部通过
+
 ## 后续改进计划（继续迭代）
 
 ### 数据源扩展
@@ -166,9 +178,9 @@ wombat-miles search SFO NRT 2024-06-01 --output results.json
 - Virgin Atlantic Flying Club
 
 ### 功能增强（无需本地IP）
-- **多城市搜索**：枢纽机场扩展（如 SFO/LAX/SEA 同时出发），一条命令搜多个出发地（★★★ 下一个优先）
-- **最优兑换建议**：输入手头里程，推荐最合算的路线/舱位（★★）
+- **最优兑换建议**：输入手头里程，推荐最合算的路线/舱位（★★★ 下一个优先）
 - **告警升级**：支持邮件（SMTP）通知，多 webhook（通知到多个频道）（★★）
+- **连接航班支持**：搜索中转航线（如 SFO→ICN→BKK），自动匹配可行连接（★★）
 
 ### 界面升级
 - 交互式 TUI (textual 框架)：方向键浏览日历，实时过滤（★★）

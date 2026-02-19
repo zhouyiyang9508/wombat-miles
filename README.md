@@ -60,6 +60,43 @@ python -m wombat_miles search SFO NRT 2025-06-01 --days 7 --class business
 python -m wombat_miles search SFO NRT --start 2025-06-01 --end 2025-06-30 --class business --summary
 ```
 
+### Multi-City Search 🌍
+
+Compare award availability from multiple departure cities to the same destination. Find the best deal by expanding your origin options.
+
+```bash
+# Compare SFO, LAX, and SEA to Tokyo
+python -m wombat_miles multi-city SFO,LAX,SEA NRT 2025-06-15 --class business
+
+# Bay Area airports to Toronto (Aeroplan only)
+python -m wombat_miles multi-city SFO,OAK,SJC YYZ 2025-07-01 --program aeroplan
+
+# Multi-day + multi-city search
+python -m wombat_miles multi-city SFO,LAX NRT 2025-06-01 --days 3 --class business
+
+# Save comparison to JSON
+python -m wombat_miles multi-city SFO,LAX,SEA NRT 2025-06-15 -o comparison.json
+```
+
+Example output:
+```
+✈  Multi-City Search: → NRT  |  2025-06-15 | Business
+
+📊 Best Options by Origin:
+╭────────┬────────────┬───────┬──────────┬──────────┬─────────╮
+│ Origin │ Best Miles │ Taxes │ Cabin    │ Program  │ Flights │
+├────────┼────────────┼───────┼──────────┼──────────┼─────────┤
+│ LAX    │     65,000 │   $45 │ Business │ Alaska ✈ │       3 │
+│ SFO    │     70,000 │   $50 │ Business │ Alaska ✈ │       5 │
+│ SEA    │     75,000 │   $55 │ Business │ Alaska ✈ │       2 │
+╰────────┴────────────┴───────┴──────────┴──────────┴─────────╯
+
+🔍 Top 20 Deals:
+[Detailed flight listing with times, stops, miles sorted by price...]
+```
+
+**Why use multi-city?** Sometimes flying from a nearby hub saves 10k+ miles. If you live near multiple airports or are flexible about positioning flights, this feature helps you maximize value.
+
 ### Output Options
 
 ```bash
