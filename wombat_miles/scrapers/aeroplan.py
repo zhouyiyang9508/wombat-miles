@@ -6,7 +6,7 @@ import logging
 from typing import Any, Optional
 
 from .base import BaseScraper
-from ..models import Flight, FlightFare
+from ..models import Flight, FlightFare, Segment
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,7 @@ class AeroplanScraper(BaseScraper):
         destination: str,
         date: str,
         cabin: Optional[str] = None,
+        max_stops: int = 0,
     ) -> list[Flight]:
         """Search Aeroplan award availability using browser automation."""
         try:
@@ -115,7 +116,7 @@ class AeroplanScraper(BaseScraper):
             logger.error(f"Aeroplan scraper error: {e}")
             return []
 
-        flights = self._parse_response(raw_data, origin.upper(), destination.upper())
+        flights = self._parse_response(raw_data, origin.upper(), destination.upper(), max_stops=max_stops)
 
         # Filter by cabin if specified
         if cabin:
@@ -125,7 +126,7 @@ class AeroplanScraper(BaseScraper):
 
         return flights
 
-    def _parse_response(self, raw: dict, origin: str, destination: str) -> list[Flight]:
+    def _parse_response(self, raw: dict, origin: str, destination: str, max_stops: int = 0) -> list[Flight]:
         """Parse Aeroplan API response into Flight objects."""
         errors = raw.get("errors", [])
         if errors:
@@ -150,50 +151,83 @@ class AeroplanScraper(BaseScraper):
 
         for group in air_bound_groups:
             bound_details = group.get("boundDetails", {})
-            segments = bound_details.get("segments", [])
+            segments_raw = bound_details.get("segments", [])
+            num_segments = len(segments_raw)
+            stops = num_segments - 1
 
-            # Skip connections
-            if len(segments) != 1:
+            # Filter by max stops
+            if stops > max_stops:
                 continue
 
-            flight_id = segments[0].get("flightId", "")
-            flight_info = flight_dict.get(flight_id)
-            if not flight_info:
+            # Get first and last segment info
+            first_flight_id = segments_raw[0].get("flightId", "")
+            last_flight_id = segments_raw[-1].get("flightId", "")
+
+            first_info = flight_dict.get(first_flight_id)
+            last_info = flight_dict.get(last_flight_id)
+            if not first_info or not last_info:
                 continue
 
-            dep_loc = flight_info.get("departure", {})
-            arr_loc = flight_info.get("arrival", {})
+            itinerary_origin = first_info.get("departure", {}).get("locationCode", "")
+            itinerary_dest = last_info.get("arrival", {}).get("locationCode", "")
 
-            seg_origin = dep_loc.get("locationCode", "")
-            seg_dest = arr_loc.get("locationCode", "")
-
-            # Only direct matches
-            if seg_origin != origin or seg_dest != destination:
+            if itinerary_origin != origin or itinerary_dest != destination:
                 continue
 
-            marketing_code = flight_info.get("marketingAirlineCode", "")
-            marketing_number = flight_info.get("marketingFlightNumber", "")
-            flight_no = f"{marketing_code} {marketing_number}".strip()
+            # Build segment list
+            parsed_segments: list[Segment] = []
+            aircraft_list = []
+            total_duration = 0
 
-            aircraft_code = flight_info.get("aircraftCode", "")
-            aircraft = aircraft_dict.get(aircraft_code, aircraft_code)
+            for seg_ref in segments_raw:
+                fid = seg_ref.get("flightId", "")
+                finfo = flight_dict.get(fid)
+                if not finfo:
+                    continue
 
-            duration_sec = flight_info.get("duration", 0)
-            duration_min = duration_sec // 60 if duration_sec > 0 else 0
+                dep = finfo.get("departure", {})
+                arr = finfo.get("arrival", {})
+                mcode = finfo.get("marketingAirlineCode", "")
+                mnum = finfo.get("marketingFlightNumber", "")
+                acode = finfo.get("aircraftCode", "")
+                aircraft_name = aircraft_dict.get(acode, acode)
+                aircraft_list.append(aircraft_name)
+
+                seg_duration_sec = finfo.get("duration", 0)
+                seg_duration_min = seg_duration_sec // 60 if seg_duration_sec > 0 else 0
+                total_duration += seg_duration_min
+
+                parsed_segments.append(Segment(
+                    flight_no=f"{mcode} {mnum}".strip(),
+                    origin=dep.get("locationCode", ""),
+                    destination=arr.get("locationCode", ""),
+                    departure=dep.get("dateTime", "")[:19].replace("T", " "),
+                    arrival=arr.get("dateTime", "")[:19].replace("T", " "),
+                    duration=seg_duration_min,
+                    aircraft=aircraft_name or "Unknown",
+                ))
+
+            # Build display flight number
+            if num_segments == 1:
+                display_flight_no = parsed_segments[0].flight_no
+            else:
+                display_flight_no = " → ".join(s.flight_no for s in parsed_segments)
 
             flight = Flight(
-                flight_no=flight_no,
-                origin=seg_origin,
-                destination=seg_dest,
-                departure=dep_loc.get("dateTime", "")[:19].replace("T", " "),
-                arrival=arr_loc.get("dateTime", "")[:19].replace("T", " "),
-                duration=duration_min,
-                aircraft=aircraft or "Unknown",
+                flight_no=display_flight_no,
+                origin=itinerary_origin,
+                destination=itinerary_dest,
+                departure=parsed_segments[0].departure,
+                arrival=parsed_segments[-1].arrival,
+                duration=total_duration,
+                aircraft=", ".join(dict.fromkeys(aircraft_list)),
                 has_wifi=None,
+                segments=parsed_segments,
             )
 
             # Parse fares
             cabin_best: dict[str, FlightFare] = {}
+            first_marketing_code = first_info.get("marketingAirlineCode", "")
 
             for air_bound in group.get("airBounds", []):
                 avail_details = air_bound.get("availabilityDetails", [{}])
@@ -206,7 +240,7 @@ class AeroplanScraper(BaseScraper):
                 booking_class = detail.get("bookingClass", "?")
 
                 # Special case: UA markets Business class as First (I booking class)
-                if booking_class == "I" and marketing_code == "UA":
+                if booking_class == "I" and first_marketing_code == "UA":
                     cabin = "economy"
 
                 prices = air_bound.get("prices", {})
@@ -217,7 +251,6 @@ class AeroplanScraper(BaseScraper):
                 miles = converted.get("base", 0)
                 taxes_cents = converted.get("totalTaxes", 0)
                 cash = round(taxes_cents / 100, 2)
-                currency = remaining.get("currencyCode", "USD")
 
                 fare = FlightFare(
                     miles=miles,

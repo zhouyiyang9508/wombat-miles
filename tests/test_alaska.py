@@ -79,15 +79,36 @@ def test_parse_international():
     assert biz.booking_class == "J"
 
 
-def test_connections_skipped():
-    """Test that connecting flights are skipped."""
+def test_connections_skipped_by_default():
+    """Test that connecting flights are skipped when max_stops=0."""
     scraper = AlaskaScraper()
-    flights = scraper._parse_response(ALASKA_RESPONSE, "SFO", "LAX")
+    flights = scraper._parse_response(ALASKA_RESPONSE, "SFO", "LAX", max_stops=0)
     # Only 2 direct flights, not the connection
     assert len(flights) == 2
     for f in flights:
         assert f.origin == "SFO"
         assert f.destination == "LAX"
+        assert f.is_direct
+        assert f.stops == 0
+
+
+def test_connections_included():
+    """Test that connecting flights are included when max_stops >= 1."""
+    scraper = AlaskaScraper()
+    flights = scraper._parse_response(ALASKA_RESPONSE, "SFO", "LAX", max_stops=1)
+    # Should get all 3 (2 direct + 1 connection via SEA)
+    assert len(flights) == 3
+
+    # Find the connection
+    connecting = [f for f in flights if not f.is_direct]
+    assert len(connecting) == 1
+    conn = connecting[0]
+    assert conn.stops == 1
+    assert "SFO" == conn.origin
+    assert "LAX" == conn.destination
+    assert len(conn.segments) == 2
+    assert conn.segments[0].destination == "SEA"
+    assert "1 stop (SEA)" == conn.stops_display()
 
 
 def test_origin_dest_filter():
@@ -129,7 +150,8 @@ if __name__ == "__main__":
     test_parse_empty()
     test_parse_no_slices()
     test_parse_international()
-    test_connections_skipped()
+    test_connections_skipped_by_default()
+    test_connections_included()
     test_origin_dest_filter()
     test_duration_parse()
     test_best_fare()

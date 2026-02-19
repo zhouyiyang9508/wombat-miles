@@ -60,14 +60,29 @@ def test_parse_second_flight():
     assert f2.fares[0].miles == 70000
 
 
-def test_connections_skipped():
-    """Test that connecting flights are skipped."""
+def test_connections_skipped_by_default():
+    """Test that connecting flights are skipped when max_stops=0."""
     scraper = AeroplanScraper()
-    flights = scraper._parse_response(AEROPLAN_RESPONSE, "SFO", "YYZ")
+    flights = scraper._parse_response(AEROPLAN_RESPONSE, "SFO", "YYZ", max_stops=0)
     assert len(flights) == 2
     for f in flights:
         assert f.origin == "SFO"
         assert f.destination == "YYZ"
+        assert f.is_direct
+
+
+def test_connections_included():
+    """Test connecting flights included when max_stops >= 1."""
+    scraper = AeroplanScraper()
+    flights = scraper._parse_response(AEROPLAN_RESPONSE, "SFO", "YYZ", max_stops=1)
+    # Should get 3 (2 direct + 1 connection via YVR)
+    assert len(flights) == 3
+    connecting = [f for f in flights if not f.is_direct]
+    assert len(connecting) == 1
+    conn = connecting[0]
+    assert conn.stops == 1
+    assert len(conn.segments) == 2
+    assert conn.segments[0].destination == "YVR"
 
 
 def test_parse_empty():
@@ -106,7 +121,8 @@ def test_cabin_mapping():
 if __name__ == "__main__":
     test_parse_basic()
     test_parse_second_flight()
-    test_connections_skipped()
+    test_connections_skipped_by_default()
+    test_connections_included()
     test_parse_empty()
     test_parse_error()
     test_origin_dest_filter()

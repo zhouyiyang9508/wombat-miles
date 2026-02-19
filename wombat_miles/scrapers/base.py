@@ -21,6 +21,7 @@ class BaseScraper(ABC):
         destination: str,
         date: str,
         cabin: Optional[str] = None,
+        max_stops: int = 0,
     ) -> list[Flight]:
         """
         Search for award availability.
@@ -30,6 +31,7 @@ class BaseScraper(ABC):
             destination: IATA airport code (e.g. "NRT")
             date: Date in YYYY-MM-DD format
             cabin: Optional cabin filter (economy/business/first)
+            max_stops: Maximum number of stops (0=direct only)
             
         Returns:
             List of flights with available award fares.

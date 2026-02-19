@@ -1,5 +1,7 @@
 """Output formatting for award search results."""
 
+import csv
+import io
 import json
 from typing import Optional
 
@@ -78,6 +80,7 @@ def print_results(
     table.add_column("Departs", no_wrap=True)
     table.add_column("Arrives", no_wrap=True)
     table.add_column("Duration", justify="right")
+    table.add_column("Stops", justify="center")
     table.add_column("Aircraft")
     table.add_column("Miles", justify="right", style="bold")
     table.add_column("Taxes", justify="right")
@@ -102,6 +105,10 @@ def print_results(
             else "–"
         )
 
+        stops_display = flight.stops_display()
+        stops_style = "green" if flight.is_direct else ("yellow" if flight.stops == 1 else "red")
+        stops_text = Text(stops_display, style=stops_style)
+
         for i, fare in enumerate(fares_to_show):
             cabin_style = CABIN_STYLES.get(fare.cabin, "white")
             cabin_text = Text(fare.cabin.title(), style=cabin_style)
@@ -113,6 +120,7 @@ def print_results(
                     flight.departure[11:16] if len(flight.departure) > 10 else flight.departure,
                     flight.arrival[11:16] if len(flight.arrival) > 10 else flight.arrival,
                     flight.format_duration(),
+                    stops_text,
                     flight.aircraft or "–",
                     format_miles(fare.miles),
                     format_cash(fare.cash),
@@ -123,6 +131,7 @@ def print_results(
             else:
                 # Additional fare rows (indented)
                 table.add_row(
+                    "",
                     "",
                     "",
                     "",
@@ -237,3 +246,41 @@ def print_multi_date_summary(
         )
 
     console.print(table)
+
+
+def results_to_csv(results: list[SearchResult], cabin_filter: Optional[str] = None) -> str:
+    """Convert results to CSV string."""
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "date", "flight_no", "origin", "destination", "departure", "arrival",
+        "duration_min", "stops", "aircraft", "cabin", "miles", "taxes_usd",
+        "booking_class", "program", "is_saver", "has_wifi",
+    ])
+
+    for result in results:
+        for flight in result.flights:
+            fares = flight.fares
+            if cabin_filter:
+                fares = [f for f in fares if f.cabin == cabin_filter]
+            for fare in fares:
+                writer.writerow([
+                    result.date,
+                    flight.flight_no,
+                    flight.origin,
+                    flight.destination,
+                    flight.departure,
+                    flight.arrival,
+                    flight.duration,
+                    flight.stops,
+                    flight.aircraft,
+                    fare.cabin,
+                    fare.miles,
+                    fare.cash,
+                    fare.booking_class,
+                    fare.program,
+                    fare.is_saver,
+                    flight.has_wifi,
+                ])
+
+    return output.getvalue()

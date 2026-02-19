@@ -15,6 +15,7 @@ from .formatter import (
     print_multi_date_summary,
     print_results,
     print_results_json,
+    results_to_csv,
 )
 from .models import SearchResult
 from .scrapers import AlaskaScraper, AeroplanScraper
@@ -56,6 +57,7 @@ async def _search_date(
     search_date: str,
     cabin: Optional[str],
     use_cache: bool,
+    max_stops: int = 0,
 ) -> SearchResult:
     """Run search for a single date across all scrapers."""
     all_flights = []
@@ -75,7 +77,7 @@ async def _search_date(
     # Run uncached searches concurrently
     async def fetch_scraper(scraper, cache_key):
         try:
-            flights = await scraper.search(origin, destination, search_date, cabin)
+            flights = await scraper.search(origin, destination, search_date, cabin, max_stops=max_stops)
             # Serialize for cache (simple dict form)
             import dataclasses
             raw = [dataclasses.asdict(f) for f in flights]
@@ -131,6 +133,7 @@ def search(
     output: Annotated[Optional[str], typer.Option("-o", help="Output file path (JSON)")] = None,
     no_cache: Annotated[bool, typer.Option("--no-cache", help="Skip cache")] = False,
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Verbose logging")] = False,
+    stops: Annotated[int, typer.Option("--stops", help="Max stops (0=direct only, 1=one stop, etc.)")] = 0,
     summary: Annotated[bool, typer.Option("--summary", "-s", help="Show summary table for date ranges")] = False,
 ):
     """
@@ -140,7 +143,7 @@ def search(
 
       wombat-miles search SFO NRT 2025-06-01 --class business
 
-      wombat-miles search SFO NRT 2025-06-01 --program alaska
+      wombat-miles search SFO NRT 2025-06-01 --program alaska --stops 1
 
       wombat-miles search SFO YYZ --start 2025-06-01 --end 2025-06-30 --class business --summary
     """
@@ -179,7 +182,7 @@ def search(
             console.print(f"[dim]Searching {origin.upper()} → {destination.upper()} on {search_date}...[/dim]")
             result = await _search_date(
                 scrapers, origin.upper(), destination.upper(),
-                search_date, cabin, use_cache
+                search_date, cabin, use_cache, max_stops=stops
             )
             all_results.append(result)
         return all_results
@@ -188,32 +191,36 @@ def search(
 
     # Output
     if output:
-        import json
-        all_data = []
-        for r in results:
-            fares_cabin = cabin
-            for f in r.flights:
-                fares = f.fares
-                if fares_cabin:
-                    fares = [fa for fa in fares if fa.cabin == fares_cabin]
-                if not fares:
-                    continue
-                import dataclasses
-                fd = dataclasses.asdict(f)
-                fd["fares"] = [dataclasses.asdict(fa) for fa in fares]
-                all_data.append(fd)
-        with open(output, "w") as fp:
-            json.dump(all_data, fp, indent=2)
-        console.print(f"[green]Results saved to {output}[/green]")
+        if output.endswith(".csv"):
+            csv_str = results_to_csv(results, cabin)
+            with open(output, "w") as fp:
+                fp.write(csv_str)
+            console.print(f"[green]Results saved to {output} (CSV)[/green]")
+        else:
+            import json
+            import dataclasses
+            all_data = []
+            for r in results:
+                for f in r.flights:
+                    fares = f.fares
+                    if cabin:
+                        fares = [fa for fa in fares if fa.cabin == cabin]
+                    if not fares:
+                        continue
+                    fd = dataclasses.asdict(f)
+                    fd["fares"] = [dataclasses.asdict(fa) for fa in fares]
+                    fd["date"] = r.date
+                    all_data.append(fd)
+            with open(output, "w") as fp:
+                json.dump(all_data, fp, indent=2)
+            console.print(f"[green]Results saved to {output} (JSON)[/green]")
 
     if len(results) > 1 and summary:
         print_multi_date_summary(results, cabin)
-    else:
+
+    if not output:
         for result in results:
-            if output:
-                print_results_json(result, cabin)
-            else:
-                print_results(result, cabin)
+            print_results(result, cabin)
 
 
 @cache_app.command("clear")

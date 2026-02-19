@@ -23,8 +23,21 @@ class FlightFare:
 
 
 @dataclass
+class Segment:
+    """Represents a single flight segment."""
+    flight_no: str
+    origin: str
+    destination: str
+    departure: str
+    arrival: str
+    duration: int   # minutes
+    aircraft: str
+    has_wifi: Optional[bool] = None
+
+
+@dataclass
 class Flight:
-    """Represents a flight with available award fares."""
+    """Represents a flight itinerary with available award fares."""
     flight_no: str
     origin: str
     destination: str
@@ -34,6 +47,24 @@ class Flight:
     aircraft: str
     fares: list[FlightFare] = field(default_factory=list)
     has_wifi: Optional[bool] = None
+    segments: list[Segment] = field(default_factory=list)
+
+    @property
+    def stops(self) -> int:
+        """Number of stops (0 = direct)."""
+        return max(0, len(self.segments) - 1) if self.segments else 0
+
+    @property
+    def is_direct(self) -> bool:
+        return self.stops == 0
+
+    def stops_display(self) -> str:
+        if self.stops == 0:
+            return "Direct"
+        if self.stops == 1 and self.segments:
+            via = self.segments[0].destination
+            return f"1 stop ({via})"
+        return f"{self.stops} stops"
 
     def best_fare(self, cabin: Optional[str] = None) -> Optional[FlightFare]:
         """Get the lowest-miles fare, optionally filtered by cabin."""

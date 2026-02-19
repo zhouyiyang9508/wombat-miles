@@ -6,7 +6,7 @@ import logging
 from typing import Any, Optional
 
 from .base import BaseScraper
-from ..models import Flight, FlightFare
+from ..models import Flight, FlightFare, Segment
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +61,7 @@ class AlaskaScraper(BaseScraper):
         destination: str,
         date: str,
         cabin: Optional[str] = None,
+        max_stops: int = 0,
     ) -> list[Flight]:
         """Search Alaska award availability using browser automation."""
         try:
@@ -79,7 +80,7 @@ class AlaskaScraper(BaseScraper):
         if raw_data is None:
             return []
 
-        flights = self._parse_response(raw_data, origin.upper(), destination.upper())
+        flights = self._parse_response(raw_data, origin.upper(), destination.upper(), max_stops=max_stops)
 
         if cabin:
             flights = [f for f in flights if any(fare.cabin == cabin for fare in f.fares)]
@@ -177,7 +178,7 @@ class AlaskaScraper(BaseScraper):
             logger.error(f"Alaska Playwright error: {e}")
             return None
 
-    def _parse_response(self, raw: dict, origin: str, destination: str) -> list[Flight]:
+    def _parse_response(self, raw: dict, origin: str, destination: str, max_stops: int = 0) -> list[Flight]:
         """Parse Alaska API response into Flight objects."""
         if raw is None:
             return []
@@ -190,42 +191,84 @@ class AlaskaScraper(BaseScraper):
         results: list[Flight] = []
 
         for slice_data in slices:
-            segments = slice_data.get("segments", [])
-            if len(segments) != 1:
+            segments_raw = slice_data.get("segments", [])
+            num_segments = len(segments_raw)
+            stops = num_segments - 1
+
+            # Filter by max stops
+            if stops > max_stops:
                 continue
 
-            seg = segments[0]
-            seg_origin = seg.get("departureStation", "")
-            seg_dest = seg.get("arrivalStation", "")
+            # Check that the route starts and ends correctly
+            first_seg = segments_raw[0]
+            last_seg = segments_raw[-1]
+            itinerary_origin = first_seg.get("departureStation", "")
+            itinerary_dest = last_seg.get("arrivalStation", "")
 
-            if seg_origin != origin or seg_dest != destination:
+            if itinerary_origin != origin or itinerary_dest != destination:
                 continue
 
-            carrier = seg.get("publishingCarrier", {})
-            flight_no = f"{carrier.get('carrierCode', '')} {carrier.get('flightNumber', '')}".strip()
+            # Build segment list
+            parsed_segments: list[Segment] = []
+            total_duration = 0
+            all_wifi = True
+            any_wifi_known = False
+            aircraft_list = []
 
-            amenities = seg.get("amenities", [])
-            has_wifi = "Wi-Fi" in amenities if amenities else None
+            for seg in segments_raw:
+                carrier = seg.get("publishingCarrier", {})
+                seg_flight_no = f"{carrier.get('carrierCode', '')} {carrier.get('flightNumber', '')}".strip()
 
-            duration_raw = seg.get("duration", 0)
-            if isinstance(duration_raw, int):
-                duration = duration_raw
-            elif isinstance(duration_raw, str):
-                duration = self._parse_duration(duration_raw)
+                amenities = seg.get("amenities", [])
+                seg_wifi = "Wi-Fi" in amenities if amenities else None
+                if seg_wifi is not None:
+                    any_wifi_known = True
+                    if not seg_wifi:
+                        all_wifi = False
+
+                duration_raw = seg.get("duration", 0)
+                if isinstance(duration_raw, int):
+                    seg_duration = duration_raw
+                elif isinstance(duration_raw, str):
+                    seg_duration = self._parse_duration(duration_raw)
+                else:
+                    seg_duration = 0
+                total_duration += seg_duration
+
+                aircraft_list.append(seg.get("aircraft", "Unknown"))
+
+                parsed_segments.append(Segment(
+                    flight_no=seg_flight_no,
+                    origin=seg.get("departureStation", ""),
+                    destination=seg.get("arrivalStation", ""),
+                    departure=seg.get("departureTime", "")[:19].replace("T", " "),
+                    arrival=seg.get("arrivalTime", "")[:19].replace("T", " "),
+                    duration=seg_duration,
+                    aircraft=seg.get("aircraft", "Unknown"),
+                    has_wifi=seg_wifi,
+                ))
+
+            # Build display flight number (join segment flight numbers)
+            if num_segments == 1:
+                display_flight_no = parsed_segments[0].flight_no
             else:
-                duration = 0
+                display_flight_no = " → ".join(s.flight_no for s in parsed_segments)
+
+            has_wifi = all_wifi if any_wifi_known else None
 
             flight = Flight(
-                flight_no=flight_no,
-                origin=seg_origin,
-                destination=seg_dest,
-                departure=seg.get("departureTime", "")[:19].replace("T", " "),
-                arrival=seg.get("arrivalTime", "")[:19].replace("T", " "),
-                duration=duration,
-                aircraft=seg.get("aircraft", "Unknown"),
+                flight_no=display_flight_no,
+                origin=itinerary_origin,
+                destination=itinerary_dest,
+                departure=parsed_segments[0].departure,
+                arrival=parsed_segments[-1].arrival,
+                duration=total_duration,
+                aircraft=", ".join(dict.fromkeys(aircraft_list)),  # deduplicate preserving order
                 has_wifi=has_wifi,
+                segments=parsed_segments,
             )
 
+            # Parse fares
             fares_raw = slice_data.get("fares", {})
             if isinstance(fares_raw, dict):
                 fares_raw = list(fares_raw.values())

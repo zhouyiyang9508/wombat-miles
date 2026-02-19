@@ -40,6 +40,9 @@ python -m wombat_miles search SFO NRT 2025-06-15
 # Business class only
 python -m wombat_miles search SFO NRT 2025-06-15 --class business
 
+# Include 1-stop connections
+python -m wombat_miles search SFO NRT 2025-06-15 --class business --stops 1
+
 # Search using only Alaska
 python -m wombat_miles search SEA NRT 2025-06-15 --class business --program alaska
 
@@ -62,6 +65,9 @@ python -m wombat_miles search SFO NRT --start 2025-06-01 --end 2025-06-30 --clas
 ```bash
 # Save results to JSON
 python -m wombat_miles search SFO NRT 2025-06-15 -o results.json
+
+# Save results to CSV (great for spreadsheets)
+python -m wombat_miles search SFO NRT 2025-06-15 -o results.csv
 
 # Verbose logging (for debugging)
 python -m wombat_miles search SFO NRT 2025-06-15 -v
@@ -126,14 +132,14 @@ wombat-miles/
 ## Limitations
 
 - **Local execution required** — airlines block data center IPs
-- **Direct flights only** — connecting itineraries are not shown (yet)
 - **Playwright required** — needs Chromium installed (~200MB)
 - **Anti-bot detection** — Aeroplan in particular may occasionally block automated requests
 
 ## Roadmap
 
 ### Near-term
-- [ ] Connection/multi-segment flight support
+- [x] Connection/multi-segment flight support (`--stops N`)
+- [x] CSV export (`-o results.csv`)
 - [ ] Interactive TUI with `textual`
 - [ ] Email/Discord alerts when award space opens
 - [ ] Auto-search popular routes on schedule
