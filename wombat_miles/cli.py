@@ -1091,6 +1091,175 @@ def recommend(
         )
 
 
+@app.command()
+def connection(
+    origin: Annotated[str, typer.Argument(help="Origin airport code (e.g. SFO)")],
+    via: Annotated[str, typer.Argument(help="Connection airport code (e.g. ICN)")],
+    destination: Annotated[str, typer.Argument(help="Final destination code (e.g. BKK)")],
+    travel_date: Annotated[str, typer.Argument(help="Travel date (YYYY-MM-DD)")],
+    cabin: Annotated[Optional[str], typer.Option("--class", "-c", help="Cabin: economy, business, first")] = "business",
+    program: Annotated[str, typer.Option("--program", "-p", help="Program: alaska, aeroplan, all")] = "all",
+    min_layover: Annotated[float, typer.Option("--min-layover", help="Min layover hours")] = 2.0,
+    max_layover: Annotated[float, typer.Option("--max-layover", help="Max layover hours")] = 24.0,
+    no_cache: Annotated[bool, typer.Option("--no-cache", help="Skip cache")] = False,
+    verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Verbose logging")] = False,
+    output: Annotated[Optional[str], typer.Option("--output", "-o", help="Output JSON file")] = None,
+):
+    """
+    🔄 Search for connecting flights via a specific hub.
+
+    Finds viable itineraries from origin → via → destination on the same day,
+    with reasonable layover times.
+
+    Examples:
+
+      # SFO to Bangkok via Seoul (ICN)
+      wombat-miles connection SFO ICN BKK 2025-06-15 --class business
+
+      # Flexible layover (3-12 hours)
+      wombat-miles connection LAX NRT HND 2025-07-01 --min-layover 3 --max-layover 12
+
+      # Alaska only
+      wombat-miles connection SFO ICN BKK 2025-06-15 --program alaska
+    """
+    from .connection import find_connections, format_duration
+
+    if verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+
+    if cabin and cabin not in ("economy", "business", "first"):
+        console.print("[red]Invalid cabin. Choose: economy, business, first[/red]")
+        raise typer.Exit(1)
+
+    scrapers = _get_scrapers(program)
+    use_cache = not no_cache
+
+    console.print(
+        f"[bold]🔄 Searching connections {origin} → {via} → {destination}[/bold]\n"
+        f"  Date: {travel_date}\n"
+        f"  Cabin: {cabin or 'all'}\n"
+        f"  Layover: {min_layover}h - {max_layover}h\n"
+        f"  Program: {program}\n"
+    )
+
+    # Search first leg (origin → via)
+    console.print(f"[cyan]Searching leg 1: {origin} → {via}...[/cyan]")
+    try:
+        first_leg_result = asyncio.run(
+            _search_date(scrapers, origin, via, travel_date, cabin, use_cache)
+        )
+        first_leg_flights = first_leg_result.flights
+        console.print(f"  Found {len(first_leg_flights)} flight(s)")
+    except Exception as e:
+        console.print(f"[red]Error searching first leg: {e}[/red]")
+        raise typer.Exit(1)
+
+    # Search second leg (via → destination)
+    console.print(f"[cyan]Searching leg 2: {via} → {destination}...[/cyan]")
+    try:
+        second_leg_result = asyncio.run(
+            _search_date(scrapers, via, destination, travel_date, cabin, use_cache)
+        )
+        second_leg_flights = second_leg_result.flights
+        console.print(f"  Found {len(second_leg_flights)} flight(s)")
+    except Exception as e:
+        console.print(f"[red]Error searching second leg: {e}[/red]")
+        raise typer.Exit(1)
+
+    if not first_leg_flights or not second_leg_flights:
+        console.print("\n[yellow]No flights found on one or both legs.[/yellow]")
+        return
+
+    # Find viable connections
+    connections = find_connections(
+        first_leg_flights,
+        second_leg_flights,
+        min_layover_hours=min_layover,
+        max_layover_hours=max_layover,
+        cabin=cabin,
+    )
+
+    if not connections:
+        console.print(
+            f"\n[yellow]No viable connections found with {min_layover}h-{max_layover}h layover.[/yellow]\n"
+            f"[dim]Try adjusting --min-layover or --max-layover parameters.[/dim]"
+        )
+        return
+
+    # Display results
+    from rich.table import Table
+
+    table = Table(
+        title=f"\n✈️  {len(connections)} Connection(s) Found: {origin} → {via} → {destination}",
+        show_header=True,
+        header_style="bold cyan",
+    )
+    table.add_column("#", justify="right", style="dim")
+    table.add_column("Leg 1", style="bold")
+    table.add_column("Depart", style="cyan")
+    table.add_column("Arrive", style="cyan")
+    table.add_column("Layover", justify="right", style="yellow")
+    table.add_column("Leg 2", style="bold")
+    table.add_column("Depart", style="cyan")
+    table.add_column("Arrive", style="cyan")
+    table.add_column("Total Miles", justify="right", style="green")
+    table.add_column("Total Taxes", justify="right")
+    table.add_column("Total Time", justify="right", style="magenta")
+
+    for i, conn in enumerate(connections[:20], 1):  # Show top 20
+        table.add_row(
+            str(i),
+            f"{conn.first_segment.flight_no}",
+            conn.first_segment.departure.strftime("%H:%M"),
+            conn.first_segment.arrival.strftime("%H:%M"),
+            format_duration(conn.layover_minutes),
+            f"{conn.second_segment.flight_no}",
+            conn.second_segment.departure.strftime("%H:%M"),
+            conn.second_segment.arrival.strftime("%H:%M"),
+            f"{conn.total_miles:,}",
+            f"${conn.total_cash:.0f}",
+            format_duration(conn.total_duration_minutes),
+        )
+
+    console.print(table)
+
+    if len(connections) > 20:
+        console.print(f"\n[dim]Showing top 20 of {len(connections)} connections[/dim]")
+
+    # JSON export
+    if output:
+        import json
+        data = []
+        for conn in connections:
+            data.append({
+                "origin": conn.origin,
+                "via": conn.via,
+                "destination": conn.destination,
+                "departure": conn.departure.isoformat(),
+                "arrival": conn.arrival.isoformat(),
+                "first_segment": {
+                    "flight_no": conn.first_segment.flight_no,
+                    "departure": conn.first_segment.departure.isoformat(),
+                    "arrival": conn.first_segment.arrival.isoformat(),
+                    "duration_minutes": conn.first_segment.duration,
+                },
+                "second_segment": {
+                    "flight_no": conn.second_segment.flight_no,
+                    "departure": conn.second_segment.departure.isoformat(),
+                    "arrival": conn.second_segment.arrival.isoformat(),
+                    "duration_minutes": conn.second_segment.duration,
+                },
+                "layover_minutes": conn.layover_minutes,
+                "total_miles": conn.total_miles,
+                "total_cash": conn.total_cash,
+                "total_duration_minutes": conn.total_duration_minutes,
+            })
+        
+        with open(output, "w") as f:
+            json.dump(data, f, indent=2)
+        console.print(f"\n[green]Results saved to {output}[/green]")
+
+
 # ---------------------------------------------------------------------------
 # email-config commands — manage SMTP configurations
 # ---------------------------------------------------------------------------

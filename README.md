@@ -175,6 +175,61 @@ python -m wombat_miles search SFO NRT 2025-06-15 -v
 python -m wombat_miles search SFO NRT 2025-06-15 --no-cache
 ```
 
+### Connection Flights 🔄
+
+Search for connecting itineraries via a specific hub. Automatically matches flights with reasonable layover times and calculates total miles, taxes, and duration.
+
+```bash
+# SFO to Bangkok via Seoul (ICN)
+python -m wombat_miles connection SFO ICN BKK 2025-06-15 --class business
+
+# LAX to Haneda via Narita (3-12 hour layover)
+python -m wombat_miles connection LAX NRT HND 2025-07-01 --min-layover 3 --max-layover 12
+
+# Alaska only, strict 2-6 hour layover
+python -m wombat_miles connection SFO ICN BKK 2025-06-15 --program alaska --min-layover 2 --max-layover 6
+
+# Save connection options to JSON
+python -m wombat_miles connection SFO ICN BKK 2025-06-15 -o connections.json
+```
+
+Example output:
+```
+🔄 Searching connections SFO → ICN → BKK
+  Date: 2025-06-15
+  Cabin: business
+  Layover: 2.0h - 24.0h
+  Program: all
+
+Searching leg 1: SFO → ICN...
+  Found 3 flight(s)
+Searching leg 2: ICN → BKK...
+  Found 4 flight(s)
+
+✈  5 Connection(s) Found: SFO → ICN → BKK
+╭────┬──────────┬────────┬────────┬─────────┬──────────┬────────┬────────┬──────────────┬──────────────┬──────────────╮
+│  # │ Leg 1    │ Depart │ Arrive │ Layover │ Leg 2    │ Depart │ Arrive │  Total Miles │  Total Taxes │   Total Time │
+├────┼──────────┼────────┼────────┼─────────┼──────────┼────────┼────────┼──────────────┼──────────────┼──────────────┤
+│  1 │ AS 62    │  10:30 │  15:45 │    3h0m │ OZ 743   │  18:45 │  22:00 │       85,000 │         $120 │       11h30m │
+│  2 │ AS 62    │  10:30 │  15:45 │    5h0m │ KE 651   │  20:45 │  23:45 │       87,500 │         $135 │       13h15m │
+│  3 │ AC 64    │  12:00 │  17:15 │    4h0m │ OZ 743   │  21:15 │  00:30 │       90,000 │         $140 │       12h30m │
+│ .. │          │        │        │         │          │        │        │              │              │              │
+╰────┴──────────┴────────┴────────┴─────────┴──────────┴────────┴────────┴──────────────┴──────────────┴──────────────╯
+```
+
+**Why search connections?**
+- Some routes only have award seats with connections (e.g., no direct SFO→BKK)
+- Sometimes a connection is actually cheaper in miles than direct
+- Allows strategic positioning (e.g., fly into NRT, connect to regional Japan airports)
+- Control layover length based on your preference (quick transit vs. explore the hub city)
+
+**Default parameters:**
+- `--min-layover 2` (2 hours minimum — safe for international connections)
+- `--max-layover 24` (24 hours max — avoids overnight stays)
+- Adjust based on your comfort level
+
+**Tip:** If you want to explore a hub city during layover, use `--min-layover 6 --max-layover 18` to find connections with a half-day to full-day layover.
+
 ### Calendar View 📅
 
 See a full month of availability at a glance. Each cell shows the cheapest available award price. Colors are **relative** — green = cheapest days, yellow = moderate, red = expensive.

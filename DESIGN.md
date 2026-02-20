@@ -209,6 +209,28 @@ wombat-miles search SFO NRT 2024-06-01 --output results.json
 - [x] 107 个总测试全部通过（包括旧测试的兼容更新）
 - [x] 无需本地 IP，纯 SQLite + HTTP POST + SMTP
 
+### Phase 13: 连接航班支持 ✅ (2026-02-20)
+- [x] **connection 命令**：搜索中转航线（如 SFO→ICN→BKK）
+  - 语法：`wombat-miles connection ORIGIN VIA DEST DATE --class business`
+  - 自动匹配可行连接（合理的转机时间窗口）
+  - 参数：`--min-layover` (默认2h), `--max-layover` (默认24h)
+- [x] **核心逻辑** (`wombat_miles/connection.py`)：
+  - 搜索两段航班并匹配时间
+  - 确保转机机场一致
+  - 过滤舱位（如果指定）
+  - 计算总里程、总税费、总时长
+  - 按总里程排序结果
+- [x] **Rich 表格输出**：
+  - 显示完整行程（两段航班）
+  - 转机时间、总里程、总税费、总时长
+  - 最多显示 Top 20 结果
+- [x] **JSON 导出**：`--output` 参数保存完整连接详情
+- [x] **单元测试**：10 个测试覆盖核心场景
+  - 基本匹配、转机时间过短/过长、机场不匹配
+  - 多航班组合、舱位过滤、空列表处理
+  - 所有测试通过（117 个总测试）
+- [x] 无需本地 IP，纯逻辑实现
+
 ## 后续改进计划（继续迭代）
 
 ### 数据源扩展
@@ -219,8 +241,8 @@ wombat-miles search SFO NRT 2024-06-01 --output results.json
 - Virgin Atlantic Flying Club
 
 ### 功能增强（无需本地IP）
-- **连接航班支持**：搜索中转航线（如 SFO→ICN→BKK），自动匹配可行连接（★★★ 下一个优先）
-- **推荐引擎升级**：考虑停留时长、舱位质量（平躺/直飞偏好）、历史价格趋势（★★）
+- **推荐引擎升级**：考虑停留时长、舱位质量（平躺/直飞偏好）、历史价格趋势（★★★ 下一个优先）
+- **多段行程规划**：扩展 connection 支持 3+ 段航线（如 SFO→NRT→BKK→SIN）（★★）
 - **告警增强**：Telegram bot 集成、短信通知（Twilio）（★）
 
 ### 界面升级
@@ -230,3 +252,4 @@ wombat-miles search SFO NRT 2024-06-01 --output results.json
 ### 其他
 - 里程票价格对比（同一航班不同计划的成本对比表）
 - 多币种支持（显示人民币/欧元等价税费）
+- connection 命令增强：支持同一天多次转机（3+ 段）
