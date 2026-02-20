@@ -240,16 +240,60 @@ When a new price low is detected vs. the last 30 days, a 🔔 alert is printed i
 
 ### Alert System 🔔
 
-Set up automatic notifications for when award availability meets your criteria. Combines with `monitor` (run via cron) to get Discord pings when cheap business seats appear.
+Set up automatic notifications for when award availability meets your criteria. Supports **multiple webhooks** (Discord, Slack, etc.) and **email** notifications. Combines with `monitor` (run via cron) to get notified when cheap business seats appear.
+
+#### Webhook Notifications (Discord, Slack, etc.)
 
 ```bash
-# Create an alert: notify when SFO→NRT business drops to ≤70k miles
+# Create an alert with Discord webhook
 python -m wombat_miles alert add SFO NRT --class business --max-miles 70000 --webhook https://discord.com/api/webhooks/...
 
-# Alert on any availability (no miles threshold)
-python -m wombat_miles alert add SFO YYZ --class business
+# Multiple webhooks (different channels/platforms)
+python -m wombat_miles alert add SFO NRT --class business \
+  --webhook https://discord.com/api/webhooks/xxx \
+  --webhook https://hooks.slack.com/services/yyy
+```
 
-# List configured alerts
+#### Email Notifications 📧
+
+First, configure an SMTP email server:
+
+```bash
+# Add an email config (Gmail example with app password)
+python -m wombat_miles email-config add default \
+  --host smtp.gmail.com --port 587 \
+  --user yourname@gmail.com \
+  --password your-app-password
+
+# List email configs (passwords redacted)
+python -m wombat_miles email-config list
+
+# Remove an email config
+python -m wombat_miles email-config remove default
+```
+
+Then create alerts with email:
+
+```bash
+# Email-only alert
+python -m wombat_miles alert add SFO NRT --class business \
+  --email user@example.com --email-config default
+
+# Multiple recipients
+python -m wombat_miles alert add SFO NRT --class business \
+  --email person1@example.com --email person2@example.com \
+  --email-config default
+
+# Both webhook + email
+python -m wombat_miles alert add SFO NRT --class business \
+  --webhook https://discord.com/api/webhooks/xxx \
+  --email user@example.com --email-config default
+```
+
+#### Managing Alerts
+
+```bash
+# List configured alerts (shows notification channels)
 python -m wombat_miles alert list
 
 # Remove an alert by ID

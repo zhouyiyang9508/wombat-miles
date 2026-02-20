@@ -210,7 +210,9 @@ class TestFireAlert:
             cabin="business",
             program="alaska",
             max_miles=70_000,
-            discord_webhook=None,
+            webhooks=[],
+            email_to=[],
+            email_config=None,
             enabled=1,
             created_at="2025-01-01",
         )
@@ -233,25 +235,20 @@ class TestFireAlert:
         from wombat_miles import alerts
 
         t = self._make_triggered()
-        t.alert.discord_webhook = "https://discord.com/api/webhooks/fake"
+        t.alert.webhooks = ["https://discord.com/api/webhooks/fake"]
 
-        with patch("urllib.request.urlopen") as mock_open:
+        with patch("wombat_miles.alerts._send_webhook") as mock_send:
             result = alerts.fire_alert(t, dry_run=True)
-            mock_open.assert_not_called()
+            mock_send.assert_not_called()
         assert result is True  # dry_run always True
 
     def test_webhook_sent_on_fire(self):
         from wombat_miles import alerts
 
         t = self._make_triggered()
-        t.alert.discord_webhook = "https://discord.com/api/webhooks/fake"
+        t.alert.webhooks = ["https://discord.com/api/webhooks/fake"]
 
-        mock_resp = MagicMock()
-        mock_resp.status = 204
-        mock_resp.__enter__ = lambda s: s
-        mock_resp.__exit__ = MagicMock(return_value=False)
-
-        with patch("urllib.request.urlopen", return_value=mock_resp):
+        with patch("wombat_miles.alerts._send_webhook", return_value=True):
             result = alerts.fire_alert(t, dry_run=False)
 
         assert result is True
@@ -260,7 +257,7 @@ class TestFireAlert:
         from wombat_miles import alerts
 
         t = self._make_triggered()
-        t.alert.discord_webhook = None
+        t.alert.webhooks = []
         result = alerts.fire_alert(t, dry_run=False)
         assert result is True  # no webhook = no-op, not failure
 
@@ -268,7 +265,7 @@ class TestFireAlert:
         from wombat_miles import alerts
 
         t = self._make_triggered()
-        t.alert.discord_webhook = None
+        t.alert.webhooks = []
         alerts.fire_alert(t)
 
         history = alerts.get_alert_history()
@@ -288,7 +285,8 @@ class TestBuildDiscordEmbed:
         alert = Alert(
             id=1, origin="SFO", destination="NRT",
             cabin="business", program="alaska", max_miles=70_000,
-            discord_webhook=None, enabled=1, created_at="",
+            webhooks=[], email_to=[], email_config=None,
+            enabled=1, created_at="",
         )
         return TriggeredAlert(
             alert=alert,
@@ -346,7 +344,8 @@ class TestAlertDescription:
         a = Alert(
             id=1, origin="SFO", destination="NRT",
             cabin="business", program="alaska", max_miles=70_000,
-            discord_webhook=None, enabled=1, created_at="",
+            webhooks=[], email_to=[], email_config=None,
+            enabled=1, created_at="",
         )
         desc = a.description
         assert "SFO → NRT" in desc
@@ -360,7 +359,8 @@ class TestAlertDescription:
         a = Alert(
             id=1, origin="SFO", destination="NRT",
             cabin=None, program="all", max_miles=None,
-            discord_webhook=None, enabled=1, created_at="",
+            webhooks=[], email_to=[], email_config=None,
+            enabled=1, created_at="",
         )
         desc = a.description
         assert "SFO → NRT" in desc

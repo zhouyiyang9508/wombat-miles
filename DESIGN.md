@@ -187,6 +187,28 @@ wombat-miles search SFO NRT 2024-06-01 --output results.json
 - [x] 6 个单元测试全部通过
 - [x] 无需本地 IP，纯搜索+分析逻辑
 
+### Phase 12: 告警系统升级 ✅ (2026-02-20)
+- [x] **多 Webhook 支持**：每个 alert 可配置多个 webhook URL
+  - Discord、Slack、其他任意支持 JSON webhook 的平台
+  - `alert add --webhook URL1 --webhook URL2` 语法（可重复）
+  - 并行发送到所有 webhook，部分失败不影响整体成功
+- [x] **SMTP 邮件通知**：支持邮件告警
+  - `email-config` 命令组：add/list/remove 邮件配置
+  - 支持 TLS/无 TLS SMTP 服务器
+  - `alert add --email user@example.com --email-config default` 语法
+  - 纯文本邮件格式（包含 emoji + 航班详情）
+- [x] **通知灵活组合**：同一 alert 可同时配置 webhook + email
+- [x] **数据库迁移逻辑**：向后兼容旧 `discord_webhook` 字段
+  - 自动将旧单个 webhook 迁移到新的 JSON 数组格式
+  - 新增 `email_configs` 表存储 SMTP 配置
+- [x] **CLI 更新**：
+  - `alert add` 支持 `--webhook`（多个）、`--email`（多个）、`--email-config`
+  - `alert list` 显示通知渠道摘要（"2 webhook(s), 1 email(s)"）
+  - `email-config add/list/remove` 管理 SMTP 配置
+- [x] 16 个新单元测试全部通过（email config CRUD、多 webhook、混合通知、失败处理、迁移）
+- [x] 107 个总测试全部通过（包括旧测试的兼容更新）
+- [x] 无需本地 IP，纯 SQLite + HTTP POST + SMTP
+
 ## 后续改进计划（继续迭代）
 
 ### 数据源扩展
@@ -197,9 +219,9 @@ wombat-miles search SFO NRT 2024-06-01 --output results.json
 - Virgin Atlantic Flying Club
 
 ### 功能增强（无需本地IP）
-- **告警升级**：支持邮件（SMTP）通知，多 webhook（通知到多个频道）（★★★ 下一个优先）
-- **连接航班支持**：搜索中转航线（如 SFO→ICN→BKK），自动匹配可行连接（★★）
+- **连接航班支持**：搜索中转航线（如 SFO→ICN→BKK），自动匹配可行连接（★★★ 下一个优先）
 - **推荐引擎升级**：考虑停留时长、舱位质量（平躺/直飞偏好）、历史价格趋势（★★）
+- **告警增强**：Telegram bot 集成、短信通知（Twilio）（★）
 
 ### 界面升级
 - 交互式 TUI (textual 框架)：方向键浏览日历，实时过滤（★★）

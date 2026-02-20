@@ -41,6 +41,9 @@ app.add_typer(history_app, name="history")
 alert_app = typer.Typer(help="Award-flight alert commands")
 app.add_typer(alert_app, name="alert")
 
+email_config_app = typer.Typer(help="Email configuration commands")
+app.add_typer(email_config_app, name="email-config")
+
 logging.basicConfig(
     level=logging.WARNING,
     format="%(levelname)s: %(message)s",
@@ -624,7 +627,9 @@ def alert_add(
     cabin: Annotated[Optional[str], typer.Option("--class", "-c", help="Cabin: economy, business, first")] = None,
     program: Annotated[str, typer.Option("--program", "-p", help="Program: alaska, aeroplan, all")] = "all",
     max_miles: Annotated[Optional[int], typer.Option("--max-miles", "-m", help="Trigger when miles ≤ this value")] = None,
-    webhook: Annotated[Optional[str], typer.Option("--webhook", "-w", help="Discord webhook URL")] = None,
+    webhook: Annotated[list[str], typer.Option("--webhook", "-w", help="Webhook URL (repeatable for multiple)")] = None,
+    email: Annotated[list[str], typer.Option("--email", "-e", help="Email address (repeatable for multiple)")] = None,
+    email_config: Annotated[Optional[str], typer.Option("--email-config", help="Email config name (required if --email is set)")] = "default",
 ):
     """
     ➕ Create a new award-flight alert.
@@ -635,14 +640,27 @@ def alert_add(
 
     Examples:
 
+      # Webhook notification (Discord/Slack)
       wombat-miles alert add SFO NRT --class business --max-miles 70000 --webhook https://discord.com/api/webhooks/...
 
-      wombat-miles alert add SFO YYZ --program aeroplan --max-miles 35000
+      # Multiple webhooks (different channels/servers)
+      wombat-miles alert add SFO NRT --webhook <discord1> --webhook <slack1>
 
-      wombat-miles alert add SFO NRT   # notify on any availability
+      # Email notification
+      wombat-miles alert add SFO NRT --class business --email user@example.com --email-config default
+
+      # Both webhook + email
+      wombat-miles alert add SFO NRT --webhook <url> --email user@example.com --email-config default
+
+      # Simple alert (any availability)
+      wombat-miles alert add SFO NRT
     """
     if cabin and cabin not in ("economy", "business", "first"):
         console.print("[red]Invalid cabin. Choose: economy, business, first[/red]")
+        raise typer.Exit(1)
+    
+    if email and not email_config:
+        console.print("[red]--email-config is required when using --email[/red]")
         raise typer.Exit(1)
 
     alert_id = alerts_mod.add_alert(
@@ -651,7 +669,9 @@ def alert_add(
         cabin=cabin,
         program=program,
         max_miles=max_miles,
-        discord_webhook=webhook,
+        webhooks=list(webhook) if webhook else None,
+        email_to=list(email) if email else None,
+        email_config=email_config if email else None,
     )
     console.print(f"[green]✅ Alert #{alert_id} created:[/green] {origin.upper()} → {destination.upper()}", end="")
     if cabin:
@@ -659,7 +679,9 @@ def alert_add(
     if max_miles:
         console.print(f" | ≤ {max_miles:,} miles", end="")
     if webhook:
-        console.print(f" | 🔔 Discord webhook set", end="")
+        console.print(f" | 🔔 {len(webhook)} webhook(s)", end="")
+    if email:
+        console.print(f" | 📧 {len(email)} email(s)", end="")
     console.print()
 
 
@@ -693,11 +715,17 @@ def alert_list(
     table.add_column("Cabin")
     table.add_column("Program")
     table.add_column("Max Miles", justify="right")
-    table.add_column("Webhook", style="dim")
+    table.add_column("Notifications", style="dim")
     table.add_column("Status")
 
     for a in alert_list_data:
-        webhook_display = "✅ set" if a.discord_webhook else "[dim]—[/dim]"
+        notif_parts = []
+        if a.webhooks:
+            notif_parts.append(f"🔔 {len(a.webhooks)} webhook(s)")
+        if a.email_to:
+            notif_parts.append(f"📧 {len(a.email_to)} email(s)")
+        notif_display = ", ".join(notif_parts) if notif_parts else "[dim]none[/dim]"
+        
         status = "[green]active[/green]" if a.enabled else "[dim]disabled[/dim]"
         table.add_row(
             str(a.id),
@@ -705,7 +733,7 @@ def alert_list(
             a.cabin.title() if a.cabin else "[dim]any[/dim]",
             a.program,
             f"{a.max_miles:,}" if a.max_miles else "[dim]any[/dim]",
-            webhook_display,
+            notif_display,
             status,
         )
 
@@ -1061,6 +1089,106 @@ def recommend(
             f"[dim]💡 CPM (cents per mile flown) guideline: "
             f"<1.5¢=excellent, 1.5-2.0¢=good, >2.0¢=fair[/dim]"
         )
+
+
+# ---------------------------------------------------------------------------
+# email-config commands — manage SMTP configurations
+# ---------------------------------------------------------------------------
+
+@email_config_app.command("add")
+def email_config_add(
+    name: Annotated[str, typer.Argument(help="Config name (e.g. 'default', 'gmail')")],
+    host: Annotated[str, typer.Option("--host", help="SMTP host (e.g. smtp.gmail.com)")],
+    port: Annotated[int, typer.Option("--port", help="SMTP port (e.g. 587 for TLS)")] = 587,
+    user: Annotated[str, typer.Option("--user", help="SMTP username / email")],
+    password: Annotated[str, typer.Option("--password", help="SMTP password (use app password for Gmail)")],
+    from_addr: Annotated[Optional[str], typer.Option("--from", help="From address (defaults to --user)")] = None,
+    no_tls: Annotated[bool, typer.Option("--no-tls", help="Disable TLS (use plain SMTP)")] = False,
+):
+    """
+    ➕ Add or update an email configuration.
+
+    Examples:
+
+      # Gmail (using app password)
+      wombat-miles email-config add default --host smtp.gmail.com --port 587 \
+        --user yourname@gmail.com --password <app-password>
+
+      # Custom SMTP
+      wombat-miles email-config add custom --host mail.example.com --port 465 \
+        --user alerts@example.com --password secret --from "Wombat Alerts <alerts@example.com>"
+    """
+    alerts_mod.add_email_config(
+        name=name,
+        smtp_host=host,
+        smtp_port=port,
+        smtp_user=user,
+        smtp_pass=password,
+        from_addr=from_addr or user,
+        use_tls=not no_tls,
+    )
+    console.print(f"[green]✅ Email config '{name}' saved.[/green]")
+
+
+@email_config_app.command("list")
+def email_config_list():
+    """
+    📋 List configured email configs (passwords redacted).
+
+    Example:
+
+      wombat-miles email-config list
+    """
+    from rich.table import Table
+    from rich import box as rich_box
+
+    configs = alerts_mod.list_email_configs()
+    if not configs:
+        console.print("[dim]No email configs. Use `wombat-miles email-config add` to create one.[/dim]")
+        return
+
+    table = Table(
+        title="📧 Email Configurations",
+        box=rich_box.ROUNDED,
+        show_header=True,
+        header_style="bold cyan",
+    )
+    table.add_column("Name", style="bold")
+    table.add_column("SMTP Host")
+    table.add_column("Port", justify="right")
+    table.add_column("User")
+    table.add_column("From Address")
+    table.add_column("TLS")
+
+    for c in configs:
+        table.add_row(
+            c.name,
+            c.smtp_host,
+            str(c.smtp_port),
+            c.smtp_user,
+            c.from_addr,
+            "✅" if c.use_tls else "❌",
+        )
+
+    console.print(table)
+
+
+@email_config_app.command("remove")
+def email_config_remove(
+    name: Annotated[str, typer.Argument(help="Config name to remove")],
+):
+    """
+    🗑  Remove an email configuration.
+
+    Example:
+
+      wombat-miles email-config remove custom
+    """
+    if alerts_mod.remove_email_config(name):
+        console.print(f"[green]Email config '{name}' removed.[/green]")
+    else:
+        console.print(f"[red]Email config '{name}' not found.[/red]")
+        raise typer.Exit(1)
 
 
 def main():
