@@ -97,6 +97,68 @@ Example output:
 
 **Why use multi-city?** Sometimes flying from a nearby hub saves 10k+ miles. If you live near multiple airports or are flexible about positioning flights, this feature helps you maximize value.
 
+### Optimal Redemption Recommendations 💡
+
+Not sure where to use your miles? Let Wombat Miles search multiple popular destinations and rank them by **value** (CPM, distance, cabin class). Perfect for "I have 70k Alaska miles — where should I go?" questions.
+
+```bash
+# Best business class redemptions from SFO in June (searches 26 destinations)
+python -m wombat_miles recommend SFO 2025-06-01 --class business --days 7
+
+# Best Asia redemptions with 70k miles budget
+python -m wombat_miles recommend SFO 2025-06-01 --region asia --max-miles 70000
+
+# Top 5 recommendations, Alaska only
+python -m wombat_miles recommend LAX 2025-07-15 --program alaska --top 5
+
+# Compare all regions, show top 20
+python -m wombat_miles recommend SFO 2025-06-01 --top 20
+```
+
+Example output:
+```
+💡 Finding optimal redemptions from SFO...
+  Destinations: 26 (all regions)
+  Dates: 2025-06-01 to 2025-06-07
+  Cabin: business
+  Program: all
+
+  Searching SFO → NRT... 5 flight(s)
+  Searching SFO → ICN... 3 flight(s)
+  ...
+
+🏆 Top 10 Award Redemption Recommendations
+╭──────┬──────────────┬────────────┬──────────┬─────────┬────────┬──────────┬──────────┬───────╮
+│ Rank │ Route        │ Date       │ Cabin    │   Miles │  Taxes │ Distance │      CPM │ Score │
+├──────┼──────────────┼────────────┼──────────┼─────────┼────────┼──────────┼──────────┼───────┤
+│   #1 │ SFO→NRT      │ 2025-06-05 │ 💺 Biz   │  55,000 │    $86 │ 5,140 mi │   1.67¢  │ 233.8 │
+│   #2 │ SFO→ICN      │ 2025-06-03 │ 💺 Biz   │  62,500 │    $90 │ 5,963 mi │   1.51¢  │ 238.5 │
+│   #3 │ SFO→HKG      │ 2025-06-07 │ 💺 Biz   │  75,000 │   $110 │ 6,927 mi │   1.59¢  │ 230.8 │
+│  ... │              │            │          │         │        │          │          │       │
+╰──────┴──────────────┴────────────┴──────────┴─────────┴────────┴──────────┴──────────┴───────╯
+
+📊 Top 10 average: 66,500 miles, 1.62¢/mi CPM
+💡 CPM (cents per mile flown) guideline: <1.5¢=excellent, 1.5-2.0¢=good, >2.0¢=fair
+```
+
+**What is CPM?** Cents Per Mile (CPM) measures how much cash you pay per actual mile flown. For example:
+- SFO→NRT = 5,140 mi, $86 taxes → **1.67¢/mi**
+- Lower CPM = better deal (you're minimizing out-of-pocket cost per distance)
+- Typical sweet spot: **1.0-2.0¢** for business class long-haul
+
+**Why it matters:**
+- **Long-haul business/first** usually has the best CPM (1.0-1.5¢)
+- **Short-haul economy** often has poor CPM (2.5-4.0¢) — save miles for better uses
+- **Compare across routes**: Tokyo at 55k miles (1.67¢) beats LA at 12.5k miles (3.5¢)
+
+**Scoring algorithm:**
+- Base: `(distance × cabin_multiplier) / miles`
+- Cabin multipliers: First=3.0x, Business=2.5x, Economy=1.0x
+- Penalties: high taxes, over-budget options
+- Higher score = better redemption value
+
+**Regions available:** `asia` (8 destinations), `europe` (8), `oceania` (3), `domestic` (5 US cities)
+
 ### Output Options
 
 ```bash
@@ -299,8 +361,10 @@ wombat-miles/
 - [x] Monthly calendar view (`calendar-view`)
 - [x] Price history tracking + new-low alerts (`history show / stats / clear`)
 - [x] Discord webhook alerts + `monitor` cron command (`alert add / list / remove / history`)
-- [ ] Multi-city hub search (SFO/LAX/SEA simultaneously)
+- [x] Multi-city hub search (SFO/LAX/SEA simultaneously) — `multi-city` command
+- [x] Optimal redemption recommendations (`recommend` command) — searches multiple destinations, ranks by value/CPM
 - [ ] Interactive TUI with `textual`
+- [ ] Email (SMTP) alert support + multi-webhook configs
 
 ### More Programs
 - [ ] United MileagePlus

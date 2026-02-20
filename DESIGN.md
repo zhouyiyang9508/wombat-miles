@@ -168,6 +168,25 @@ wombat-miles search SFO NRT 2024-06-01 --output results.json
 - [x] 复用现有 cache、scraper 逻辑，无需本地 IP
 - [x] 4 个单元测试全部通过
 
+### Phase 11: 最优兑换建议 ✅ (2026-02-20)
+- [x] `wombat_miles/recommend.py`：推荐引擎核心逻辑
+- [x] `recommend` 命令：搜索多个热门目的地并按价值排序
+  - 支持指定区域（`--region asia/europe/oceania/domestic`）
+  - 支持里程预算过滤（`--max-miles 70000`）
+  - 支持舱位过滤（`--class business`）
+  - 支持计划过滤（`--program alaska`）
+  - 显示 Top N 推荐（`--top 10`）
+- [x] 价值指标计算：
+  - CPM (Cents Per Mile)：每飞行里程成本
+  - 舱位倍数：头等/商务舱价值更高
+  - 飞行距离：长途航线更值
+  - 综合评分：距离×舱位倍数/里程数
+- [x] Rich 表格输出：排名、路线、日期、舱位、里程、税费、距离、CPM、评分
+- [x] 热门目的地库：亚洲/欧洲/大洋洲/美国国内共 26 个机场
+- [x] 飞行距离数据库：覆盖主要西海岸出发地到热门目的地
+- [x] 6 个单元测试全部通过
+- [x] 无需本地 IP，纯搜索+分析逻辑
+
 ## 后续改进计划（继续迭代）
 
 ### 数据源扩展
@@ -178,9 +197,9 @@ wombat-miles search SFO NRT 2024-06-01 --output results.json
 - Virgin Atlantic Flying Club
 
 ### 功能增强（无需本地IP）
-- **最优兑换建议**：输入手头里程，推荐最合算的路线/舱位（★★★ 下一个优先）
-- **告警升级**：支持邮件（SMTP）通知，多 webhook（通知到多个频道）（★★）
+- **告警升级**：支持邮件（SMTP）通知，多 webhook（通知到多个频道）（★★★ 下一个优先）
 - **连接航班支持**：搜索中转航线（如 SFO→ICN→BKK），自动匹配可行连接（★★）
+- **推荐引擎升级**：考虑停留时长、舱位质量（平躺/直飞偏好）、历史价格趋势（★★）
 
 ### 界面升级
 - 交互式 TUI (textual 框架)：方向键浏览日历，实时过滤（★★）
@@ -188,4 +207,4 @@ wombat-miles search SFO NRT 2024-06-01 --output results.json
 
 ### 其他
 - 里程票价格对比（同一航班不同计划的成本对比表）
-- 最优兑换建议（根据你手头的里程余额）
+- 多币种支持（显示人民币/欧元等价税费）

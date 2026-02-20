@@ -905,6 +905,164 @@ def monitor(
         )
 
 
+@app.command()
+def recommend(
+    origin: Annotated[str, typer.Argument(help="Origin airport code (e.g. SFO)")],
+    start: Annotated[Optional[str], typer.Argument(help="Start date (YYYY-MM-DD)")] = None,
+    days: Annotated[int, typer.Option("--days", "-d", help="Search N days from start date")] = 7,
+    cabin: Annotated[Optional[str], typer.Option("--class", "-c", help="Cabin: economy, business, first")] = "business",
+    program: Annotated[str, typer.Option("--program", "-p", help="Program: alaska, aeroplan, all")] = "all",
+    max_miles: Annotated[Optional[int], typer.Option("--max-miles", help="Max miles you can afford")] = None,
+    region: Annotated[Optional[str], typer.Option("--region", "-r", help="Region: asia, europe, oceania, domestic")] = None,
+    top: Annotated[int, typer.Option("--top", "-n", help="Show top N recommendations")] = 10,
+    no_cache: Annotated[bool, typer.Option("--no-cache", help="Skip cache")] = False,
+    verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Verbose logging")] = False,
+):
+    """
+    💡 Get optimal award redemption recommendations.
+
+    Searches multiple popular destinations and ranks them by value (CPM, distance, cabin).
+    Perfect for "where should I use my miles?" questions.
+
+    Examples:
+
+      # Best business class redemptions from SFO in June
+      wombat-miles recommend SFO 2025-06-01 --class business --days 7
+
+      # Best Asia redemptions with 70k miles budget
+      wombat-miles recommend SFO 2025-06-01 --region asia --max-miles 70000
+
+      # Top 5 recommendations, Alaska only
+      wombat-miles recommend LAX 2025-07-15 --program alaska --top 5
+    """
+    from .recommend import get_destinations_by_region, rank_redemptions
+
+    if verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+
+    if cabin and cabin not in ("economy", "business", "first"):
+        console.print("[red]Invalid cabin. Choose: economy, business, first[/red]")
+        raise typer.Exit(1)
+
+    scrapers = _get_scrapers(program)
+
+    # Get destinations
+    destinations = get_destinations_by_region(region)
+    if not destinations:
+        console.print("[red]No destinations found for the specified region.[/red]")
+        raise typer.Exit(1)
+
+    # Build date list
+    if start:
+        start_date = date.fromisoformat(start)
+    else:
+        start_date = date.today() + timedelta(days=7)  # Default to 1 week from now
+
+    dates_to_search = [str(start_date + timedelta(days=i)) for i in range(days)]
+
+    console.print(
+        f"[bold]💡 Finding optimal redemptions from {origin}...[/bold]\n"
+        f"  Destinations: {len(destinations)} ({region or 'all regions'})\n"
+        f"  Dates: {dates_to_search[0]} to {dates_to_search[-1]}\n"
+        f"  Cabin: {cabin or 'all'}\n"
+        f"  Program: {program}\n"
+        + (f"  Budget: {max_miles:,} miles max\n" if max_miles else "")
+    )
+
+    use_cache = not no_cache
+    all_flights = []
+
+    # Search each destination
+    for dest in destinations:
+        console.print(f"  [cyan]Searching {origin} → {dest}...[/cyan]", end="")
+        sys.stdout.flush()
+
+        try:
+            results = asyncio.run(
+                _search_dates_concurrent(
+                    scrapers, origin, dest, dates_to_search,
+                    cabin=cabin, use_cache=use_cache, concurrency=3
+                )
+            )
+
+            flights_found = sum(len(r.flights) for r in results)
+            console.print(f" [dim]{flights_found} flight(s)[/dim]")
+
+            # Collect flights with metadata
+            for result in results:
+                for flight in result.flights:
+                    all_flights.append((origin, dest, result.date, flight))
+
+        except Exception as e:
+            console.print(f" [red]✗ {e}[/red]")
+            continue
+
+    if not all_flights:
+        console.print("\n[yellow]No flights found. Try different dates or destinations.[/yellow]")
+        return
+
+    # Rank redemptions
+    recommendations = rank_redemptions(
+        all_flights,
+        cabin=cabin,
+        max_miles=max_miles,
+        program=program if program != "all" else None,
+    )
+
+    if not recommendations:
+        console.print("\n[yellow]No redemptions match your criteria.[/yellow]")
+        return
+
+    # Display top N recommendations
+    from rich.table import Table
+
+    table = Table(
+        title=f"\n🏆 Top {min(top, len(recommendations))} Award Redemption Recommendations",
+        show_header=True,
+        header_style="bold cyan",
+    )
+    table.add_column("Rank", justify="right", style="dim")
+    table.add_column("Route", style="bold")
+    table.add_column("Date", style="cyan")
+    table.add_column("Cabin", justify="center")
+    table.add_column("Miles", justify="right", style="green")
+    table.add_column("Taxes", justify="right")
+    table.add_column("Distance", justify="right", style="blue")
+    table.add_column("CPM", justify="right", style="magenta")
+    table.add_column("Score", justify="right", style="yellow")
+
+    for i, rec in enumerate(recommendations[:top], 1):
+        cabin_emoji = {"economy": "🪑", "business": "💺", "first": "✈️"}.get(rec.fare.cabin, "")
+
+        table.add_row(
+            f"#{i}",
+            f"{rec.origin}→{rec.destination}",
+            rec.date,
+            f"{cabin_emoji} {rec.fare.cabin_display()}",
+            f"{rec.fare.miles:,}",
+            f"${rec.fare.cash:.0f}",
+            f"{rec.distance_miles:,} mi",
+            f"{rec.cents_per_flight_mile:.2f}¢",
+            f"{rec.score:.1f}",
+        )
+
+    console.print(table)
+
+    # Summary stats
+    if recommendations:
+        avg_cpm = sum(r.cents_per_flight_mile for r in recommendations[:top]) / min(top, len(recommendations))
+        avg_miles = sum(r.fare.miles for r in recommendations[:top]) / min(top, len(recommendations))
+
+        console.print(
+            f"\n[dim]📊 Top {min(top, len(recommendations))} average: "
+            f"{avg_miles:,.0f} miles, {avg_cpm:.2f}¢/mi CPM[/dim]"
+        )
+        console.print(
+            f"[dim]💡 CPM (cents per mile flown) guideline: "
+            f"<1.5¢=excellent, 1.5-2.0¢=good, >2.0¢=fair[/dim]"
+        )
+
+
 def main():
     app()
 
